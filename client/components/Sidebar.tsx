@@ -14,6 +14,11 @@ import {
   ChevronsUpDown, FolderGit2, LayoutDashboard, LogOut, PanelLeftClose, PanelLeftOpen, Settings, Unlink, X, Database
 } from "lucide-react";
 import { serif } from "@/app/config/font";
+import { toast } from "sonner";
+import { GithubAuthProvider, unlink } from "firebase/auth/web-extension";
+import { useAuth } from "@/context/AuthContext";
+import { auth } from "@/app/config/firebase";
+import { disconnectGithub } from "@/api/user";
 
 export type SidebarUser = {
   name: string;
@@ -84,11 +89,14 @@ function Avatar({ src, initials, size }: { src: string | null; initials: string;
 export default function Sidebar({
   collapsed, mobileOpen, onToggle, onCloseMobile, user, githubConnected, readyRepos, onDisconnect, onSignOut,
 }: Props) {
+  const { dbUser, getAuthToken, fetchDbUser } = useAuth();
   const pathname = usePathname();
   const [menuOpen, setMenuOpen] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
+   const [confirmingDisconnect, setConfirmingDisconnect] = useState<boolean>(false);
+  const [isDisconnecting, setIsDisconnecting] = useState<boolean>(false);
 
   useEffect(() => {
     const close = (e: MouseEvent) => {
@@ -111,10 +119,39 @@ export default function Sidebar({
   };
 
   const handleDisconnect = async () => {
-    setMenuOpen(false);
-    setConfirming(false);
-    await onDisconnect();
+    try {
+      setConfirmingDisconnect(true);
+      setIsDisconnecting(true);
+
+      const currentUser = auth.currentUser;
+      if (!currentUser) {
+        toast.error("No authenticated user found.");
+        return;
+      }
+
+      await unlink(currentUser, GithubAuthProvider.PROVIDER_ID);
+
+      const token = await getAuthToken(true);
+      if (!token) {
+        toast.error("Authentication token not found.");
+        return;
+      }
+      const res = await disconnectGithub(token);
+      if (res.status === "success") {
+        toast.success("GitHub disconnected successfully.");
+        await fetchDbUser();
+      } else {
+        toast.error("Failed to disconnect GitHub.");
+      }
+    } catch (error) {
+      console.error("Error disconnecting GitHub:", error);
+      toast.error("Failed to disconnect GitHub.");
+    } finally {
+      setIsDisconnecting(false);
+      setConfirmingDisconnect(false);
+    }
   };
+
 
   // Labels hide only on desktop when collapsed; the mobile drawer is always full width
   const hide = collapsed ? "md:hidden" : "";
@@ -274,7 +311,7 @@ export default function Sidebar({
                         onClick={handleDisconnect}
                         className="flex-1 rounded-md bg-[#E5776A]/15 px-3 py-1.5 text-xs font-medium text-[#E5776A] hover:bg-[#E5776A]/25"
                       >
-                        Disconnect
+              {isDisconnecting ? "Disconnecting..." : "Confirm"}
                       </button>
                     </div>
                   </div>

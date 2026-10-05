@@ -4,7 +4,6 @@ type Props = {
   total: number;
   own: number;
   shared: number;
-  indexed: number;
   orgs: string[];
   refreshedAt: string; // ISO date
 };
@@ -24,26 +23,21 @@ function Cell({
   );
 }
 
-export default function StatsStrip({ total, own, shared, indexed, orgs, refreshedAt }: Props) {
-  const pct = total ? Math.round((indexed / total) * 100) : 0;
+export default function StatsStrip({ total, own, shared,  orgs, refreshedAt }: Props) {
 
   return (
     // gap-px on a hairline-colored background draws the dividers at any column count
     <dl className="grid grid-cols-2 gap-px overflow-hidden rounded-xl border border-[#2B2723] bg-[#2B2723] lg:grid-cols-4">
-      <Cell label="Repositories" value={String(total)} hint={`${own} yours, ${shared} shared`} />
+      <Cell label="Your Repositories" value={String(own)} hint="personal" />
 
-      <Cell label="Ready to ask" value={`${indexed} of ${total}`} hint="indexed">
-        <div className="mt-2 h-1 overflow-hidden rounded-full bg-[#2B2723]">
-          <div className="h-full rounded-full bg-[#F5A524] transition-[width] duration-300" style={{ width: `${pct}%` }} />
-        </div>
-      </Cell>
+      <Cell label="Total Repos Fetched" value={String(total)} hint="all repositories" />
 
       <Cell
-        label="Organizations"
-        value={String(orgs.length)}
-        hint={orgs.length ? orgs.join(", ") : "None found"}
-        title={orgs.join(", ")}
-      />
+  label="Shared Repos & Organizations"
+  value={String(shared + orgs.length)}
+  hint={orgs.length ? `${orgs.length} org${orgs.length > 1 ? "s" : ""}` : "None"}
+  title={orgs.join(", ")}
+/>
 
       <Cell label="Last refreshed" value={timeAgo(refreshedAt)} />
     </dl>

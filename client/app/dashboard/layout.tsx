@@ -4,8 +4,8 @@ import { useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { Menu } from "lucide-react";
-import Sidebar from "@/components/workspace/Sidebar";
-import type { SidebarUser } from "@/components/workspace/Sidebar";
+import Sidebar from "@/components/Sidebar";
+import type { SidebarUser } from "@/components/Sidebar";
 import { useAuth } from "@/context/AuthContext"; // adjust to wherever your AuthProvider file lives
 import { sans } from "@/app/config/font";
 

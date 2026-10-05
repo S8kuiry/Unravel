@@ -1,18 +1,17 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import {  RefreshCw, Search } from "lucide-react";
+import { RefreshCw, Search } from "lucide-react";
 import { Repo, RepoRow } from "./RepoRow";
 import { Card } from "./Panel";
 
 type Props = {
   repos: Repo[];
   refreshing: boolean;
-  onRefresh: () => void;
-  onIndex: (r: Repo) => void;
+  // onRefresh: () => void;
 };
 
-export default function RepoList({ repos, refreshing, onRefresh, onIndex }: Props) {
+export default function RepoList({ repos, refreshing }: Props) {
   const [q, setQ] = useState("");
 
   const shown = useMemo(() => {
@@ -27,16 +26,7 @@ export default function RepoList({ repos, refreshing, onRefresh, onIndex }: Prop
     <Card
       title="Your repositories"
       meta={String(repos.length)}
-      action={
-        <button
-          onClick={onRefresh}
-          disabled={refreshing}
-          className="flex items-center gap-1.5 rounded-md px-2 py-1 text-xs text-[#A39B90] outline-none transition-colors hover:bg-[#211E1B] hover:text-[#ECE7DF] focus-visible:ring-2 focus-visible:ring-[#F5A524] disabled:opacity-60"
-        >
-          <RefreshCw className={`h-3.5 w-3.5 ${refreshing ? "animate-spin" : ""}`} />
-          Refresh from GitHub
-        </button>
-      }
+      
     >
       <div className="sticky top-0 z-10 border-b border-[#2B2723] bg-[#181614] p-3">
         <label className="flex items-center gap-2 rounded-lg border border-[#2B2723] bg-[#121110] px-3 py-2 focus-within:border-[#F5A524]/60">
@@ -51,7 +41,7 @@ export default function RepoList({ repos, refreshing, onRefresh, onIndex }: Prop
       </div>
 
       {refreshing ? (
-        <ul>
+        <ul aria-hidden="true">
           {[0, 1, 2, 3, 4].map((i) => (
             <li
               key={i}
@@ -69,7 +59,7 @@ export default function RepoList({ repos, refreshing, onRefresh, onIndex }: Prop
       ) : shown.length > 0 ? (
         <ul>
           {shown.map((r) => (
-            <RepoRow key={r.id} repo={r} onIndex={onIndex} />
+            <RepoRow key={r.id} repo={r} />
           ))}
         </ul>
       ) : (
