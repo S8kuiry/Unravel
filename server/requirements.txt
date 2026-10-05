@@ -1,0 +1,18 @@
+# --- Web framework (yours) ---
+fastapi>=0.110.0
+uvicorn[standard]>=0.28.0
+pydantic[email]>=2.6.0
+pydantic-settings>=2.2.0
+python-dotenv>=1.0.1
+python-multipart>=0.0.9
+python-dotenv>=1.0.1
+
+# --- Database (Neon Postgres, async) ---
+sqlalchemy>=2.0.25
+asyncpg>=0.29.0
+alembic>=1.13.0
+greenlet>=3.0.0
+
+# --- Auth and security ---
+firebase-admin>=6.4.0
+cryptography>=42.0.0

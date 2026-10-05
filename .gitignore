@@ -1,0 +1,7 @@
+# Secrets & Environment
+server/.env
+server/security/*.json
+
+# Python Cache
+__pycache__/
+*.pyc

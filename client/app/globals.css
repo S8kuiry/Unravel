@@ -1,0 +1,29 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+
+
+/* Dark Custom Scrollbar for Chrome, Safari, Edge, and Firefox */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #2B2723 transparent;
+}
+
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #2B2723;
+  border-radius: 9999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #4e4741;
+}
+
