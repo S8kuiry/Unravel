@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from db.database import get_db
@@ -104,6 +104,7 @@ async def github_repositories(
 async def repository_files(
     owner: str,
     repo: str,
+    branch: str = Query("main"),
     uid: str = Depends(get_current_uid),
     db: AsyncSession = Depends(get_db),
 ):
@@ -163,7 +164,7 @@ async def repository_file_contents(
             firebase_uid=uid,
             owner=owner,
             repo=repo,
-            branch=branch,  # <-- Pass branch down
+            branch=body.branch,
             paths=body.paths,
         )
 

@@ -1,11 +1,11 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Group, Panel } from "react-resizable-panels";
 import { useAuth } from "@/context/AuthContext";
 import { serif } from "@/app/config/font";
-import {  GithubMark, Handle } from "@/components/Panel";
-import { Repo,  } from "@/components/workspace/RepoRow";
+import { GithubMark, Handle } from "@/components/Panel";
+import { Repo, } from "@/components/workspace/RepoRow";
 import RepoList from "@/components/workspace/RepoList";
 import {
   GithubAuthProvider,
@@ -54,7 +54,18 @@ function useIsWide() {
   return wide;
 }
 
-function mapGithubRepoToUI(rawRepo: any, currentUserLogin: string): Repo {
+function mapGithubRepoToUI(
+  rawRepo: {
+    id: number;
+    owner?: { login?: string; type?: string };
+    name: string;
+    private: boolean;
+    description: string | null;
+    language: string | null;
+    pushed_at: string | null;
+  },
+  currentUserLogin: string
+): Repo {
   const ownerLogin = rawRepo.owner?.login || "";
   const isOwner = ownerLogin.toLowerCase() === currentUserLogin.toLowerCase();
   const isOrg = rawRepo.owner?.type === "Organization";
@@ -73,7 +84,7 @@ function mapGithubRepoToUI(rawRepo: any, currentUserLogin: string): Repo {
     private: rawRepo.private,
     description: rawRepo.description,
     language: rawRepo.language,
-    pushedAt: rawRepo.pushed_at,
+    pushedAt: rawRepo.pushed_at ?? new Date().toISOString(),
     access,
     indexed: "none",
   };
@@ -85,50 +96,61 @@ export default function WorkspacePage() {
 
   // 1. ALL HOOKS DEFINED FIRST AT TOP LEVEL
   const [repos, setRepos] = useState<Repo[]>([]);
-  const [profile, setProfile] = useState<any>(null);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [refreshing, setRefreshing] = useState<boolean>(false);
   const [isLoginGit, setLoginGit] = useState<boolean>(false);
   const [refreshedAt, setRefreshedAt] = useState(() => new Date().toISOString());
+  const githubFetchInFlight = useRef<Promise<void> | null>(null);
 
-  console.log("hwjdq ", getAuthToken())
+  const fetchGithubData = useCallback(() => {
+    if (!dbUser?.git_authorized) return Promise.resolve();
+    if (githubFetchInFlight.current) return githubFetchInFlight.current;
 
-  const fetchGithubData = useCallback(async () => {
-    if (!dbUser?.git_authorized) return;
+    const request = (async () => {
+      try {
+        setIsLoading(true);
+        const token = await getAuthToken();
+        if (!token) return;
 
-    try {
-      setIsLoading(true);
-      const token = await getAuthToken();
-      if (!token) return;
+        const [profileRes, reposRes] = await Promise.all([
+          getGithubProfile(token),
+          getGithubRepositories(token),
+        ]);
 
-      const [profileRes, reposRes] = await Promise.all([
-        getGithubProfile(token),
-        getGithubRepositories(token),
-      ]);
+        let currentLogin = dbUser.github_login || "";
 
-      let currentLogin = dbUser.github_login || "";
-
-      if (profileRes?.status === "success" && profileRes.data) {
-        setProfile(profileRes.data);
-        if (profileRes.data.login) {
-          currentLogin = profileRes.data.login;
+        if (profileRes?.status === "success" && profileRes.data) {
+          if (profileRes.data.login) {
+            currentLogin = profileRes.data.login;
+          }
         }
-      }
 
-      if (reposRes?.status === "success" && Array.isArray(reposRes.data)) {
-        const mappedRepos = reposRes.data.map((r: any) =>
-          mapGithubRepoToUI(r, currentLogin)
-        );
-        setRepos(mappedRepos);
-        setRefreshedAt(new Date().toISOString());
+        if (reposRes?.status === "success" && Array.isArray(reposRes.data)) {
+          const mappedRepos = reposRes.data.map((r) =>
+            mapGithubRepoToUI(r, currentLogin)
+          );
+          setRepos(mappedRepos);
+          setRefreshedAt(new Date().toISOString());
+        }
+      } catch (error: unknown) {
+        console.error("Error fetching GitHub data:", error);
+        toast.error(error instanceof Error ? error.message : "Failed to load GitHub data");
+      } finally {
+        setIsLoading(false);
       }
-    } catch (error: any) {
-      console.error("Error fetching GitHub data:", error);
-      toast.error(error.message || "Failed to load GitHub data");
-    } finally {
-      setIsLoading(false);
-    }
-  }, [dbUser?.git_authorized, dbUser?.github_login, getAuthToken]);
+    })();
+
+    githubFetchInFlight.current = request;
+
+    
+    // 5. Automatically clear the tracker when finished (success OR failure)
+    request.finally(() => {
+      if (githubFetchInFlight.current === request) {
+        githubFetchInFlight.current = null;
+      }
+    });
+    return request;
+  }, [dbUser, getAuthToken]);
 
   useEffect(() => {
     if (dbUser?.git_authorized) {
@@ -193,12 +215,16 @@ export default function WorkspacePage() {
       if (res.status === "success") {
         toast.success("GitHub Connected successfully!");
       }
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error("GitHub connect error:", error);
+      const errorCode =
+        typeof error === "object" && error !== null && "code" in error
+          ? error.code
+          : undefined;
       if (
-        error?.code === "auth/popup-closed-by-user" ||
-        error?.code === "auth/cancelled-popup-request" ||
-        error?.code === "auth/popup-blocked"
+        errorCode === "auth/popup-closed-by-user" ||
+        errorCode === "auth/cancelled-popup-request" ||
+        errorCode === "auth/popup-blocked"
       ) {
         toast.warning("GitHub sign-in popup was closed or blocked.");
       } else {
@@ -239,7 +265,7 @@ export default function WorkspacePage() {
     setRefreshing(false);
   };
 
-  
+
   const orgs = Array.from(new Set(repos.filter((r) => r.access === "org").map((r) => r.owner)));
 
 

@@ -1,37 +1,18 @@
 "use client";
 
-import { use, useState } from "react";
+import { use, useCallback, useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { Group, Panel } from "react-resizable-panels";
 import { sans, serif } from "@/app/config/font";
-import { Check, Copy, File, Folder, Send, Sparkles } from "lucide-react";
+import { Check, ChevronRight, ChevronDown, Copy, File, Folder, FolderOpen, Send, Sparkles } from "lucide-react";
 import { Card, Handle } from "@/components/Panel";
-
-// --- MOCK DATA ---
-const MOCK_FILES = [
-    { name: ".github", type: "folder" },
-    { name: "src", type: "folder" },
-    { name: "tests", type: "folder" },
-    { name: ".gitignore", type: "file" },
-    { name: "main.py", type: "file" },
-    { name: "README.md", type: "file" },
-    { name: "requirements.txt", type: "file" },
-];
-
-const MOCK_CODE = `from fastapi import FastAPI, Depends, HTTPException
-from sqlalchemy.ext.asyncio import AsyncSession
-from db.database import get_db
-
-app = FastAPI(title="CloudComputing-Subharthy")
-
-@app.get("/health")
-async def health_check():
-    return {"status": "healthy", "version": "1.0.0"}
-
-@app.get("/api/v1/data")
-async def get_data(db: AsyncSession = Depends(get_db)):
-    # Fetching data logic here
-    pass
-`;
+import { useAuth } from "@/context/AuthContext";
+import {
+    getRepositoryFileContents,
+    getRepositoryFiles,
+} from "@/api/github";
+import type { RepoFileEntry } from "@/types/github";
+import { buildFileTree, FileTreeNode } from "@/components/workspace/FileHandler";
 
 export default function RepoWorkspacePage({
     params,
@@ -40,20 +21,110 @@ export default function RepoWorkspacePage({
 }) {
     const resolvedParams = use(params);
     const repoName = resolvedParams.name;
+    const searchParams = useSearchParams();
+    const owner = searchParams.get("owner") ?? "";
+    const { getAuthToken } = useAuth();
 
-    const [activeFile, setActiveFile] = useState("main.py");
+    const [files, setFiles] = useState<RepoFileEntry[]>([]);
+    const [branch, setBranch] = useState("main");
+    const [truncated, setTruncated] = useState(false);
+    const [filesLoading, setFilesLoading] = useState(true);
+    const [filesError, setFilesError] = useState<string | null>(null);
+    const [activeFile, setActiveFile] = useState<string | null>(null);
+    const [fileContent, setFileContent] = useState<string>("");
+    const [contentLoading, setContentLoading] = useState(false);
+    const [contentError, setContentError] = useState<string | null>(null);
     const [chatInput, setChatInput] = useState("");
     const [copied, setCopied] = useState(false);
 
+    const fetchFiles = useCallback(async () => {
+        if (!owner) {
+            setFilesError("Missing repository owner. Open this repo from the dashboard list.");
+            setFilesLoading(false);
+            return;
+        }
+        try {
+            setFilesLoading(true);
+            setFilesError(null);
+            const token = await getAuthToken();
+            if (!token) {
+                setFilesError("You are not authenticated.");
+                return;
+            }
+            const res = await getRepositoryFiles(token, owner, repoName, "main");
+            setBranch(res.data.branch);
+            setTruncated(res.data.truncated);
+            setFiles(res.data.files);
+            setActiveFile((prev) => {
+                if (prev && res.data.files.some((f) => f.path === prev)) return prev;
+                return res.data.files[0]?.path ?? null;
+            });
+        } catch (err) {
+            setFilesError(err instanceof Error ? err.message : "Failed to load files.");
+        } finally {
+            setFilesLoading(false);
+        }
+    }, [getAuthToken, owner, repoName]);
+
+    useEffect(() => {
+        void fetchFiles();
+    }, [fetchFiles]);
+
+    useEffect(() => {
+        let cancelled = false;
+        async function loadContent() {
+            if (!activeFile || !owner) return;
+            try {
+                setContentLoading(true);
+                setContentError(null);
+                const token = await getAuthToken();
+                if (!token) {
+                    if (!cancelled) setContentError("You are not authenticated.");
+                    return;
+                }
+                const res = await getRepositoryFileContents(
+                    token,
+                    owner,
+                    repoName,
+                    [activeFile],
+                    branch
+                );
+                if (!cancelled) {
+                    setFileContent(res.data[0]?.content ?? "");
+                }
+            } catch (err) {
+                if (!cancelled) {
+                    setContentError(err instanceof Error ? err.message : "Failed to load file content.");
+                    setFileContent("");
+                }
+            } finally {
+                if (!cancelled) setContentLoading(false);
+            }
+        }
+        void loadContent();
+        return () => {
+            cancelled = true;
+        };
+    }, [activeFile, branch, getAuthToken, owner, repoName]);
+
+    const fileLabel = useMemo(
+        () => activeFile ?? "Select a file",
+        [activeFile]
+    );
+
     const handleCopyCode = async () => {
         try {
-            await navigator.clipboard.writeText(MOCK_CODE);
+            await navigator.clipboard.writeText(fileContent);
             setCopied(true);
             setTimeout(() => setCopied(false), 2000);
         } catch (err) {
             console.error("Failed to copy code:", err);
         }
     };
+
+    const fileTree = useMemo(() =>
+        buildFileTree(files),
+        [files])
 
     return (
         <div className={`flex h-[calc(100dvh-3.0rem)] min-h-[560px] w-full flex-col ${sans.className}`}>
@@ -62,10 +133,10 @@ export default function RepoWorkspacePage({
             <div className="flex items-center justify-between pb-4 shrink-0">
                 <div>
                     <h1 className={`${serif.className} text-2xl font-medium text-[#ECE7DF]`}>
-                        {repoName}
+                        {owner ? `${owner}/${repoName}` : repoName}
                     </h1>
                     <p className="mt-0.5 text-xs text-[#A39B90]">
-                        main branch • Last synchronized 2 hours ago
+                        {branch} branch • {files.length} files{truncated ? " • truncated" : ""}
                     </p>
                 </div>
                 <div className="flex items-center gap-2">
@@ -83,7 +154,7 @@ export default function RepoWorkspacePage({
                     <Panel id="codebase-view" defaultSize={65} minSize={35}>
                         <Card
                             title="Codebase Explorer"
-                            meta={activeFile}
+                            meta={fileLabel}
                             action={
                                 <div className="flex items-center gap-3">
                                     <span className="text-xs text-[#A39B90]">Read-only mode</span>
@@ -113,30 +184,46 @@ export default function RepoWorkspacePage({
                                     <div className="mb-2 px-2 text-[10px] font-semibold uppercase tracking-wider text-[#6F675D]">
                                         Files
                                     </div>
-                                    {MOCK_FILES.map((file) => (
-                                        <button
-                                            key={file.name}
-                                            onClick={() => file.type === "file" && setActiveFile(file.name)}
-                                            className={`flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-xs transition-colors hover:bg-[#211E1B] ${activeFile === file.name
-                                                ? "bg-[#211E1B] font-medium text-[#F5A524]"
-                                                : "text-[#A39B90]"
-                                                }`}
-                                        >
-                                            {file.type === "folder" ? (
-                                                <Folder className="h-3.5 w-3.5 shrink-0 text-[#6F675D]" />
-                                            ) : (
-                                                <File className="h-3.5 w-3.5 shrink-0" />
-                                            )}
-                                            <span className="truncate">{file.name}</span>
-                                        </button>
+                                    {filesLoading && (
+                                        <p className="px-3 py-4 text-xs text-[#6F675D]">Loading files…</p>
+                                    )}
+                                    {!filesLoading && filesError && (
+                                        <div className="px-3 py-2 text-xs text-red-400">
+                                            <p>{filesError}</p>
+                                            <button
+                                                onClick={() => void fetchFiles()}
+                                                className="mt-2 rounded-md border border-[#2B2723] px-2 py-1 text-[#ECE7DF] hover:border-[#F5A524]"
+                                            >
+                                                Retry
+                                            </button>
+                                        </div>
+                                    )}
+                                    {!filesLoading && !filesError && files.length === 0 && (
+                                        <p className="px-3 py-4 text-xs text-[#6F675D]">No files found.</p>
+                                    )}
+                                    {!filesLoading && !filesError && fileTree.map((node) => (
+                                        <FileTreeNode
+                                            key={node.path}
+                                            node={node}
+                                            activeFile={activeFile}
+                                            onSelectFile={setActiveFile}
+                                        />
                                     ))}
                                 </div>
 
                                 {/* File Viewer with Sticky/Header Copy Action */}
                                 <div className="relative flex-1 overflow-auto bg-[#0E0D0C] p-4">
-                                    <pre className="font-mono text-xs leading-relaxed text-[#ECE7DF]">
-                                        <code>{MOCK_CODE}</code>
-                                    </pre>
+                                    {contentLoading && (
+                                        <p className="font-mono text-xs text-[#6F675D]">Loading content…</p>
+                                    )}
+                                    {!contentLoading && contentError && (
+                                        <p className="font-mono text-xs text-red-400">{contentError}</p>
+                                    )}
+                                    {!contentLoading && !contentError && (
+                                        <pre className="font-mono text-xs leading-relaxed text-[#ECE7DF]">
+                                            <code>{fileContent || "Select a file to view its contents."}</code>
+                                        </pre>
+                                    )}
                                 </div>
                             </div>
                         </Card>

@@ -42,7 +42,7 @@ export function RepoRow({ repo, compact = false }: { repo: Repo; compact?: boole
         <div className="flex items-center gap-2">
           {/* The ::after layer stretches this link over the whole row, so the row is one big click target */}
           <Link
-            href={`/dashboard/repo/${repo.name}`}
+            href={`/dashboard/repo/${repo.name}?owner=${encodeURIComponent(repo.owner)}`}
             className="truncate text-sm text-[#ECE7DF] outline-none after:absolute after:inset-0 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[#F5A524]"
           >
             {shared && !compact && <span className="text-[#6F675D]">{repo.owner}/</span>}

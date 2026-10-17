@@ -3,10 +3,12 @@ from typing import Optional
 import httpx
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
+from sqlalchemy.dialects.postgresql import insert
 import asyncio
 from urllib.parse import quote
 
 from models.user import User
+from models.github import Repository, RepoFile, RepoBlob, _utcnow
 from security.crypto import decrypt_token
 
 
@@ -151,8 +153,9 @@ async def get_repository_files(
     firebase_uid: str,
     owner: str,
     repo: str,
+    branch: str = "main",  # <-- Added branch parameter (defaults to "main")
 ):
-    """List the necessary files in a repo (default branch)."""
+    """List the necessary files in a repo for a specific branch, and sync them to DB."""
 
     token = await get_github_token(db, firebase_uid)
 
@@ -160,8 +163,9 @@ async def get_repository_files(
         return None
 
     async with make_client() as client:
+        # 1. Fetch tree from GitHub using the requested branch name
         response = await client.get(
-            f"{GITHUB_API_URL}/repos/{owner}/{repo}/git/trees/HEAD",
+            f"{GITHUB_API_URL}/repos/{owner}/{repo}/git/trees/{branch}",
             headers=github_headers(token),
             params={"recursive": "1"},
         )
@@ -170,19 +174,68 @@ async def get_repository_files(
         raise ValueError("GitHub token is invalid or expired")
 
     if response.status_code in (403, 404):
-        raise ValueError("Repository not found or no access")
+        raise ValueError("Repository or branch not found, or no access")
 
     response.raise_for_status()
 
     data = response.json()
+    tree_items = data.get("tree", [])
+
+    # Filter files using your helper function
+    filtered_files = [
+        {"path": i["path"], "sha": i["sha"], "size": i.get("size", 0)}
+        for i in tree_items
+        if is_necessary_file(i)
+    ]
+
+    # Optional but recommended: Find the repository record in DB to cache/update RepoFile tree
+    repo_result = await db.execute(
+        select(Repository).where(
+            Repository.owner == owner,
+            Repository.name == repo
+        )
+    )
+    db_repo = repo_result.scalars().first()
+    if not db_repo:
+        insert_repo_stmt = insert(Repository).values(
+            user_uid=firebase_uid,
+            github_id=0,  # Or fetch real GitHub repository ID if available in your context
+            owner=owner,
+            name=repo,
+            is_private=False,
+            default_branch=branch,
+        ).returning(Repository)
+        
+        repo_res = await db.execute(insert_repo_stmt)
+        db_repo = repo_res.scalars().first()
+        await db.commit()
+
+    if db_repo:
+        # Upsert the file tree into RepoFile so your database knows what paths/shas belong to this branch
+        print(f"Saving {len(filtered_files)} files for repo ID: {db_repo.id}")
+        for file_info in filtered_files:
+            stmt = insert(RepoFile).values(
+                repo_id=db_repo.id,
+                branch=branch,
+                path=file_info["path"],
+                sha=file_info["sha"],
+                size=file_info["size"],
+            )
+            upsert_stmt = stmt.on_conflict_do_update(
+                index_elements=["repo_id", "branch", "path"],
+                set_={
+                    "sha": stmt.excluded.sha,
+                    "size": stmt.excluded.size,
+                }
+            )
+            await db.execute(upsert_stmt)
+        await db.commit()
+        print("Successfully committed files to DB!")
 
     return {
         "truncated": data.get("truncated", False),
-        "files": [
-            {"path": i["path"], "size": i.get("size", 0)}
-            for i in data["tree"]
-            if is_necessary_file(i)
-        ],
+        "branch": branch,
+        "files": [{"path": f["path"], "size": f["size"]} for f in filtered_files],
     }
 
 
@@ -191,14 +244,26 @@ async def get_repository_file_contents(
     firebase_uid: str,
     owner: str,
     repo: str,
+    branch: str,  # <-- Added branch parameter to ensure accurate context
     paths: list[str],
 ):
-    """Fetch raw text content for the given file paths."""
+    """Fetch raw text content for the given file paths, utilizing the RepoBlob cache."""
 
     token = await get_github_token(db, firebase_uid)
 
     if not token:
         return None
+
+    # 1. Fetch repository record from DB to get its UUID
+    repo_result = await db.execute(
+        select(Repository).where(
+            Repository.owner == owner,
+            Repository.name == repo
+        )
+    )
+    db_repo = repo_result.scalars().first()
+    if not db_repo:
+        raise ValueError("Repository not found in database")
 
     headers = {
         **github_headers(token),
@@ -208,18 +273,71 @@ async def get_repository_file_contents(
 
     async with make_client() as client:
 
-        async def fetch(path: str):
+        async def fetch_single_file(path: str):
+            # Step A: Check if we have a valid cached blob for this path in RepoBlob
+            blob_result = await db.execute(
+                select(RepoBlob).where(
+                    RepoBlob.repo_id == db_repo.id,
+                    RepoBlob.path == path
+                )
+            )
+            cached_blob = blob_result.scalars().first()
+
+            # Step B: Check what SHA this path currently expects on this branch from RepoFile
+            file_result = await db.execute(
+                select(RepoFile).where(
+                    RepoFile.repo_id == db_repo.id,
+                    RepoFile.branch == branch,
+                    RepoFile.path == path
+                )
+            )
+            repo_file = file_result.scalars().first()
+            expected_sha = repo_file.sha if repo_file else None
+
+            # Cache Hit: If cached blob exists, content is present, and SHA matches -> serve instantly from DB!
+            if cached_blob and cached_blob.content is not None and (not expected_sha or cached_blob.sha == expected_sha):
+                return {"path": path, "content": cached_blob.content}
+
+            # Cache Miss or Outdated SHA: Fetch from GitHub API
             async with semaphore:
                 r = await client.get(
                     f"{GITHUB_API_URL}/repos/{owner}/{repo}/contents/{quote(path)}",
                     headers=headers,
+                    params={"ref": branch},  # Ensure we fetch from the specified branch reference
                 )
+
             if r.status_code != 200:
                 return {"path": path, "content": None}
-            return {"path": path, "content": r.text}
 
-        return await asyncio.gather(*(fetch(p) for p in paths))
+            content = r.text
+            # Use expected_sha if available, otherwise fallback to a placeholder or get it from headers if needed
+            current_sha = expected_sha or "unknown"
+            is_binary = False  # Set based on your binary detection logic if applicable
 
+            # Step C: Upsert into path-keyed RepoBlob (replaces old content in-place cleanly)
+            insert_stmt = insert(RepoBlob).values(
+                repo_id=db_repo.id,
+                path=path,
+                sha=current_sha,
+                content=content,
+                is_binary=is_binary,
+                fetched_at=_utcnow(),
+            )
+            upsert_stmt = insert_stmt.on_conflict_do_update(
+                index_elements=["repo_id", "path"],
+                set_={
+                    "sha": insert_stmt.excluded.sha,
+                    "content": insert_stmt.excluded.content,
+                    "is_binary": insert_stmt.excluded.is_binary,
+                    "fetched_at": insert_stmt.excluded.fetched_at,
+                }
+            )
+            await db.execute(upsert_stmt)
+            await db.commit()
+
+            return {"path": path, "content": content}
+
+        return await asyncio.gather(*(fetch_single_file(p) for p in paths))
 
 # ---------------------------------------------------------
 # COLLABORATOR REPOSITORIES

@@ -52,7 +52,7 @@ class RepoBlob(Base):
     __tablename__ = "repo_blobs"
 
     repo_id = Column(
-        UUID(as_UUID=True) if "UUID" in globals() else UUID(as_uuid=True), 
+        UUID(as_uuid=True),
         ForeignKey("repositories.id", ondelete="CASCADE"),
         primary_key=True,
     )
@@ -86,3 +86,4 @@ class RepoFile(Base):
 
 class FileContentsRequest(BaseModel):
     paths: list[str]
+    branch: str = "main"
