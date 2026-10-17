@@ -4,8 +4,8 @@ import { useCallback, useEffect, useState } from "react";
 import { Group, Panel } from "react-resizable-panels";
 import { useAuth } from "@/context/AuthContext";
 import { serif } from "@/app/config/font";
-import { Card, GithubMark, Handle } from "@/components/workspace/Panel";
-import { Repo, RepoRow } from "@/components/workspace/RepoRow";
+import {  GithubMark, Handle } from "@/components/Panel";
+import { Repo,  } from "@/components/workspace/RepoRow";
 import RepoList from "@/components/workspace/RepoList";
 import {
   GithubAuthProvider,

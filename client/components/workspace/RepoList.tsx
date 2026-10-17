@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 import { RefreshCw, Search } from "lucide-react";
 import { Repo, RepoRow } from "./RepoRow";
-import { Card } from "./Panel";
+import { Card } from "../Panel";
 
 type Props = {
   repos: Repo[];

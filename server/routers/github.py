@@ -113,6 +113,7 @@ async def repository_files(
             firebase_uid=uid,
             owner=owner,
             repo=repo,
+            branch=branch,  # <-- Pass branch down
         )
 
         if files is None:
@@ -162,6 +163,7 @@ async def repository_file_contents(
             firebase_uid=uid,
             owner=owner,
             repo=repo,
+            branch=branch,  # <-- Pass branch down
             paths=body.paths,
         )
 

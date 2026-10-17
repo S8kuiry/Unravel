@@ -1,7 +1,7 @@
 'use client';
 import { TerminalDemo } from "@/components/ui/terminal-demo";
 import { useEffect, useState } from "react";
-import { signInWithPopup, GoogleAuthProvider, GithubAuthProvider, getAdditionalUserInfo } from 'firebase/auth';
+import { signInWithPopup, GoogleAuthProvider, GithubAuthProvider, getAdditionalUserInfo, fetchSignInMethodsForEmail } from 'firebase/auth';
 import { auth } from "@/app/config/firebase";
 import { useAuth } from "@/context/AuthContext";
 import { useRouter } from "next/navigation";
@@ -56,44 +56,59 @@ export default function Home() {
     }
   }, [loading, user, dbUser, isLoginGoogle, isLoginGit, router]);
 
-  // Google Login Handler
-  const handleGoogleSignIn = async () => {
-    if (isLoginGoogle || isLoginGit) return;
-    setLoginGoogle(true);
+ // Google Login Handler
+const handleGoogleSignIn = async () => {
+  if (isLoginGoogle || isLoginGit) return;
+  setLoginGoogle(true);
 
-    try {
-      const provider = new GoogleAuthProvider();
-      provider.setCustomParameters({ prompt: "select_account" });
-      provider.addScope("email");
-      provider.addScope("profile");
+  try {
+    const provider = new GoogleAuthProvider();
+    provider.setCustomParameters({ prompt: "select_account" });
+    provider.addScope("email");
+    provider.addScope("profile");
 
-      const result = await signInWithPopup(auth, provider);
-      const user = result.user;
-      console.log("Google sign-in successful:", user);
+    const result = await signInWithPopup(auth, provider);
+    const user = result.user;
 
-      const token = await user.getIdToken();
+    const token = await user.getIdToken();
 
-      const payload: UserSyncRequest = {
-        method: "google",
-        email: user.email || user.providerData[0]?.email || null,
-        display_name: user.displayName || user.providerData[0]?.displayName || null,
-        avatar_url: user.photoURL || user.providerData[0]?.photoURL || null,
-      };
+    const payload: UserSyncRequest = {
+      method: "google",
+      email: user.email || user.providerData[0]?.email || null,
+      display_name: user.displayName || user.providerData[0]?.displayName || null,
+      avatar_url: user.photoURL || user.providerData[0]?.photoURL || null,
+    };
 
-      // 1. Sync with FastAPI backend
-      const res = await syncUser(token, payload);
-      fetchDbUser(); // Refresh the backend user state in AuthContext
-      
-      if(res.status === "success") {
-        toast.success(`Welcome, ${user.displayName || user.providerData[0]?.displayName  || "User"}!`);
-      } else {
-        toast.error("Failed to sync user with backend.");
+    const res = await syncUser(token, payload);
+    fetchDbUser();
+    
+    if (res.status === "success") {
+      toast.success(`Welcome, ${user.displayName || user.providerData[0]?.displayName || "User"}!`);
+    } else {
+      toast.error("Failed to sync user with backend.");
+    }
+
+    router.replace("/dashboard");
+
+  } catch (error: any) {
+    if (error?.code === "auth/account-exists-with-different-credential") {
+      const email = error.customData?.email || "this email address";
+      let existingProvider = "GitHub"; // Fallback assumption for Google sign-in
+
+      try {
+        if (error.customData?.email) {
+          const methods = await fetchSignInMethodsForEmail(auth, error.customData.email);
+          if (methods.includes("github.com")) existingProvider = "GitHub";
+          else if (methods.includes("password")) existingProvider = "Email/Password";
+        }
+      } catch (fetchErr) {
+        console.warn("Could not fetch sign-in methods:", fetchErr);
       }
 
-     
-      router.replace("/dashboard");
-
-    } catch (error: any) {
+      toast.error(
+        `An account already exists with ${email} via ${existingProvider}. Please sign in using ${existingProvider}.`
+      );
+    } else {
       const errorCode = error?.code;
       if (
         errorCode === "auth/popup-closed-by-user" ||
@@ -105,54 +120,71 @@ export default function Home() {
         console.error("Google sign-in error:", error);
         toast.error(error?.message || "Google sign-in failed");
       }
-    } finally {
-      setLoginGoogle(false);
     }
-  };
+  } finally {
+    setLoginGoogle(false);
+  }
+};
 
-  // GitHub Login Handler
-  const handleGithubSignIn = async () => {
-    if (isLoginGoogle || isLoginGit) return;
-    setLoginGit(true);
+// GitHub Login Handler
+const handleGithubSignIn = async () => {
+  if (isLoginGoogle || isLoginGit) return;
+  setLoginGit(true);
 
-    try {
-      const provider = new GithubAuthProvider();
-      provider.addScope("user:email");
-      provider.addScope("read:org");
-      provider.addScope("repo");
+  try {
+    const provider = new GithubAuthProvider();
+    provider.addScope("user:email");
+    provider.addScope("read:org");
+    provider.addScope("repo");
 
-      const result = await signInWithPopup(auth, provider);
-      const user = result.user;
+    const result = await signInWithPopup(auth, provider);
+    const user = result.user;
 
-      const credential = GithubAuthProvider.credentialFromResult(result);
-      const githubAccessToken = credential?.accessToken || null;
-      const githubUsername = getAdditionalUserInfo(result)?.username || null;
+    const credential = GithubAuthProvider.credentialFromResult(result);
+    const githubAccessToken = credential?.accessToken || null;
+    const githubUsername = getAdditionalUserInfo(result)?.username || null;
 
-      const token = await user.getIdToken();
+    const token = await user.getIdToken();
 
-      const payload: UserSyncRequest = {
-        method: "github",
-        email: user.email || user.providerData[0]?.email || null,
-        display_name: user.displayName || user.providerData[0]?.displayName || null,
-        avatar_url: user.photoURL || user.providerData[0]?.photoURL || null,
-        github_login: githubUsername,
-        github_access_token: githubAccessToken,
-      };
+    const payload: UserSyncRequest = {
+      method: "github",
+      email: user.email || user.providerData[0]?.email || null,
+      display_name: user.displayName || user.providerData[0]?.displayName || null,
+      avatar_url: user.photoURL || user.providerData[0]?.photoURL || null,
+      github_login: githubUsername,
+      github_access_token: githubAccessToken,
+    };
 
-     // 1. Sync with FastAPI backend
-      const res = await syncUser(token, payload);
-      fetchDbUser(); // Refresh the backend user state in AuthContext
-      
-      if(res.status === "success") {
-        toast.success(`Welcome, ${user.displayName || user.providerData[0]?.displayName  || "User"}!`);
-      } else {
-        toast.error("Failed to sync user with backend.");
+    const res = await syncUser(token, payload);
+    fetchDbUser();
+    
+    if (res.status === "success") {
+      toast.success(`Welcome, ${user.displayName || user.providerData[0]?.displayName || "User"}!`);
+    } else {
+      toast.error("Failed to sync user with backend.");
+    }
+
+    router.replace("/dashboard");
+
+  } catch (error: any) {
+    if (error?.code === "auth/account-exists-with-different-credential") {
+      const email = error.customData?.email || "this email address";
+      let existingProvider = "Google"; // Fallback assumption for GitHub sign-in
+
+      try {
+        if (error.customData?.email) {
+          const methods = await fetchSignInMethodsForEmail(auth, error.customData.email);
+          if (methods.includes("google.com")) existingProvider = "Google";
+          else if (methods.includes("password")) existingProvider = "Email/Password";
+        }
+      } catch (fetchErr) {
+        console.warn("Could not fetch sign-in methods:", fetchErr);
       }
 
-      // 3. Navigate AFTER backend sync finishes
-      router.replace("/dashboard");
-
-    } catch (error: any) {
+      toast.error(
+        `An account already exists with ${email} via ${existingProvider}. Please sign in using ${existingProvider}.`
+      );
+    } else {
       const errorCode = error?.code;
       if (
         errorCode === "auth/popup-closed-by-user" ||
@@ -164,10 +196,11 @@ export default function Home() {
         console.error("GitHub sign-in error:", error);
         toast.error(error?.message || "GitHub sign-in failed");
       }
-    } finally {
-      setLoginGit(false);
     }
-  };
+  } finally {
+    setLoginGit(false);
+  }
+};
 
   return (
     <div className="flex min-h-screen w-full bg-black font-sans fixed inset-x-0 inset-y-0">

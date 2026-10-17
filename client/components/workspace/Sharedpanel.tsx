@@ -3,7 +3,7 @@
 
 import { useMemo, useState } from "react";
 import { ChevronDown, ExternalLink, Search } from "lucide-react";
-import { Card } from "./Panel";
+import { Card } from "../Panel";
 import { RepoRow, type Repo } from "./RepoRow";
 
 // GitHub serves any user's or organization's avatar at github.com/<login>.png
