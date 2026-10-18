@@ -41,6 +41,7 @@ class Repository(Base):
     # Relationships
     files = relationship("RepoFile", cascade="all, delete-orphan", passive_deletes=True)
     blobs = relationship("RepoBlob", cascade="all, delete-orphan", passive_deletes=True)
+    sync_states = relationship("RepoSyncState", cascade="all, delete-orphan", passive_deletes=True)
 
     __table_args__ = (
         UniqueConstraint("user_uid", "github_id", name="uq_repo_user_github"),
@@ -82,6 +83,23 @@ class RepoFile(Base):
     __table_args__ = (
         UniqueConstraint("repo_id", "branch", "path", name="uq_file_repo_branch_path"),
     )
+
+
+
+
+class RepoSyncState(Base):
+    """When a repo's branch file list was last pulled from GitHub (cache freshness)."""
+    __tablename__ = "repo_sync_state"
+
+    repo_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("repositories.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    branch = Column(String, primary_key=True)
+
+    last_synced_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
+    tree_truncated = Column(Boolean, nullable=False, default=False)
 
 
 class FileContentsRequest(BaseModel):

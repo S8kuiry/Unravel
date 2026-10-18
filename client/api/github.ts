@@ -72,11 +72,12 @@ export async function getRepositoryFiles(
   token: string,
   owner: string,
   repo: string,
-  branch: string = "main"
+  branch: string = "main",
+  force:boolean = false
 ): Promise<import("@/types/github").RepoFilesResponse> {
   const url = `${API_BASE_URL}/github/repositories/${encodeURIComponent(
     owner
-  )}/${encodeURIComponent(repo)}/files?branch=${encodeURIComponent(branch)}`;
+  )}/${encodeURIComponent(repo)}/files?branch=${encodeURIComponent(branch)}&force=${force}`;
   const res = await fetch(url, {
     method: "GET",
     headers: {

@@ -1,15 +1,16 @@
 from typing import Optional
-
 import httpx
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy.dialects.postgresql import insert
 import asyncio
 from urllib.parse import quote
-
 from models.user import User
-from models.github import Repository, RepoFile, RepoBlob, _utcnow
+from models.github import Repository, RepoFile, RepoBlob, _utcnow,RepoSyncState
 from security.crypto import decrypt_token
+from datetime import timedelta
+
+SYNC_TTL = timedelta(minutes=10)  # how long a synced file list counts as fresh
 
 
 GITHUB_API_URL = "https://api.github.com"
@@ -129,6 +130,61 @@ async def get_github_repositories(
 
 
 
+async def get_or_create_repository(
+    db: AsyncSession,
+    token: str,
+    firebase_uid: str,
+    owner: str,
+    repo: str,
+) -> Repository:
+    result = await db.execute(
+        select(Repository).where(
+            Repository.user_uid == firebase_uid,
+            Repository.owner == owner,
+            Repository.name == repo,
+        )
+    )
+    db_repo = result.scalars().first()
+    if db_repo:
+        return db_repo
+
+    # First time this user opens this repo: ask GitHub for the real details
+    async with make_client() as client:
+        r = await client.get(
+            f"{GITHUB_API_URL}/repos/{owner}/{repo}",
+            headers=github_headers(token),
+        )
+
+    if r.status_code == 401:
+        raise ValueError("GitHub token is invalid or expired")
+    if r.status_code in (403, 404):
+        raise ValueError("Repository or branch not found, or no access")
+    r.raise_for_status()
+    info = r.json()
+
+    stmt = insert(Repository).values(
+        user_uid=firebase_uid,
+        github_id=info["id"],
+        owner=owner,
+        name=repo,
+        is_private=info.get("private", False),
+        default_branch=info.get("default_branch", "main"),
+    )
+    stmt = stmt.on_conflict_do_update(
+        index_elements=["user_uid", "github_id"],
+        set_={
+            "owner": stmt.excluded.owner,
+            "name": stmt.excluded.name,
+            "is_private": stmt.excluded.is_private,
+            "default_branch": stmt.excluded.default_branch,
+        },
+    ).returning(Repository)
+
+    res = await db.execute(stmt)
+    db_repo = res.scalars().first()
+    await db.commit()
+    return db_repo
+
 
 
 def is_necessary_file(item: dict) -> bool:
@@ -148,12 +204,32 @@ def is_necessary_file(item: dict) -> bool:
     return not name.lower().endswith(IGNORED_EXT)
 
 
+async def read_cached_files(db: AsyncSession, repo_id, branch: str):
+    """Return the stored file list if it was synced recently, otherwise None."""
+    sync = await db.get(RepoSyncState, (repo_id, branch))
+    if not sync or _utcnow() - sync.last_synced_at > SYNC_TTL:
+        return None
+
+    result = await db.execute(
+        select(RepoFile.path, RepoFile.size).where(
+            RepoFile.repo_id == repo_id,
+            RepoFile.branch == branch,
+        )
+    )
+    return {
+        "truncated": sync.tree_truncated,
+        "branch": branch,
+        "files": [{"path": p, "size": s or 0} for p, s in result.all()],
+    }
+
 async def get_repository_files(
     db: AsyncSession,
     firebase_uid: str,
     owner: str,
     repo: str,
     branch: str = "main",  # <-- Added branch parameter (defaults to "main")
+    force: bool = False,
+
 ):
     """List the necessary files in a repo for a specific branch, and sync them to DB."""
 
@@ -161,6 +237,14 @@ async def get_repository_files(
 
     if not token:
         return None
+
+    db_repo = await get_or_create_repository(db, token, firebase_uid, owner, repo)
+
+    if not force:
+        cached = await read_cached_files(db, db_repo.id, branch)
+        if cached is not None:
+            return cached
+        
 
     async with make_client() as client:
         # 1. Fetch tree from GitHub using the requested branch name
@@ -187,28 +271,6 @@ async def get_repository_files(
         for i in tree_items
         if is_necessary_file(i)
     ]
-
-    # Optional but recommended: Find the repository record in DB to cache/update RepoFile tree
-    repo_result = await db.execute(
-        select(Repository).where(
-            Repository.owner == owner,
-            Repository.name == repo
-        )
-    )
-    db_repo = repo_result.scalars().first()
-    if not db_repo:
-        insert_repo_stmt = insert(Repository).values(
-            user_uid=firebase_uid,
-            github_id=0,  # Or fetch real GitHub repository ID if available in your context
-            owner=owner,
-            name=repo,
-            is_private=False,
-            default_branch=branch,
-        ).returning(Repository)
-        
-        repo_res = await db.execute(insert_repo_stmt)
-        db_repo = repo_res.scalars().first()
-        await db.commit()
 
     if db_repo and filtered_files:
         print(f"Bulk saving {len(filtered_files)} files for repo ID: {db_repo.id}")
@@ -237,6 +299,23 @@ async def get_repository_files(
         await db.execute(upsert_stmt)
         await db.commit()
         print("Successfully committed files in bulk!")
+    
+    sync_stmt = insert(RepoSyncState).values(
+        repo_id=db_repo.id,
+        branch=branch,
+        last_synced_at=_utcnow(),
+        tree_truncated=data.get("truncated", False),
+    )
+    await db.execute(
+        sync_stmt.on_conflict_do_update(
+            index_elements=["repo_id", "branch"],
+            set_={
+                "last_synced_at": sync_stmt.excluded.last_synced_at,
+                "tree_truncated": sync_stmt.excluded.tree_truncated,
+            },
+        )
+    )
+    await db.commit()
 
     return {
         "truncated": data.get("truncated", False),
@@ -259,10 +338,12 @@ async def get_repository_file_contents(
 
     if not token:
         return None
+    
 
     # 1. Fetch repository record from DB to get its UUID
     repo_result = await db.execute(
         select(Repository).where(
+            Repository.user_uid == firebase_uid,  
             Repository.owner == owner,
             Repository.name == repo
         )

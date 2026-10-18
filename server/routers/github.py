@@ -105,6 +105,7 @@ async def repository_files(
     owner: str,
     repo: str,
     branch: str = Query("main"),
+    force: bool = Query(False),
     uid: str = Depends(get_current_uid),
     db: AsyncSession = Depends(get_db),
 ):
@@ -115,6 +116,7 @@ async def repository_files(
             owner=owner,
             repo=repo,
             branch=branch,  # <-- Pass branch down
+            force=force
         )
 
         if files is None:

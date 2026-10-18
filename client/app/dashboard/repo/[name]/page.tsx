@@ -4,7 +4,7 @@ import { use, useMemo, useState, useCallback } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Group, Panel } from "react-resizable-panels";
 import { sans, serif } from "@/app/config/font";
-import { Check, Copy, Send, Sparkles } from "lucide-react";
+import { Check, Copy, RefreshCw, Send, Sparkles } from "lucide-react";
 import { Card, Handle } from "@/components/Panel";
 import { useAuth } from "@/context/AuthContext";
 import {
@@ -75,7 +75,7 @@ export default function RepoWorkspacePage({
     const files = filesQuery.data?.files ?? [];
     const branch = filesQuery.data?.branch ?? currentBranch;
     const truncated = filesQuery.data?.truncated ?? false;
-    const filesLoading = filesQuery.isLoading;
+    const filesLoading = filesQuery.isPending;
     const filesError = filesQuery.error?.message ?? null;
     const filesExpired = isGithubTokenExpired(filesError);
 
@@ -134,7 +134,7 @@ export default function RepoWorkspacePage({
     });
 
     const fileContent = contentQuery.data ?? "";
-    const contentLoading = contentQuery.isLoading;
+    const contentLoading = contentQuery.isPending;
     const contentError = contentQuery.error?.message ?? null;
 
 
@@ -148,7 +148,7 @@ export default function RepoWorkspacePage({
 
             // Same two API functions the queries use, run together
             const [filesRes, contentRes] = await Promise.all([
-                getRepositoryFiles(token, owner, repoName, currentBranch),
+                getRepositoryFiles(token, owner, repoName, currentBranch,true),
                 file
                     ? getRepositoryFileContents(token, owner, repoName, [file], currentBranch)
                     : Promise.resolve(null),
@@ -233,8 +233,16 @@ export default function RepoWorkspacePage({
                                 <div className="flex items-center gap-3">
                                     <span className="text-xs text-[#A39B90]">Read-only mode</span>
                                     <button
+                                        onClick={() => refreshMutation.mutate(activeFile)}
+                                        disabled={refreshMutation.isPending}
+                                        className="cursor-pointer flex items-center gap-1.5 rounded-lg border border-[#2B2723] bg-[#0E0D0C] px-2.5 py-2 text-xs font-medium text-[#ECE7DF] transition-colors hover:border-[#F5A524] hover:text-[#F5A524] focus:outline-none disabled:cursor-not-allowed disabled:opacity-60"
+                                        title="Refresh files"
+                                    >
+                                        <RefreshCw className={`h-3 w-3 ${refreshMutation.isPending ? "animate-spin" : ""}`} />
+                                    </button>
+                                    <button
                                         onClick={handleCopyCode}
-                                        className="flex items-center gap-1.5 rounded-md border border-[#2B2723] bg-[#0E0D0C] px-2.5 py-1 text-xs font-medium text-[#ECE7DF] transition-colors hover:border-[#F5A524] hover:text-[#F5A524] focus:outline-none"
+                                        className="cursor-pointer flex items-center gap-1.5 rounded-md border border-[#2B2723] bg-[#0E0D0C] px-2.5 py-1 text-xs font-medium text-[#ECE7DF] transition-colors hover:border-[#F5A524] hover:text-[#F5A524] focus:outline-none"
                                         title="Copy file contents"
                                     >
                                         {copied ? (
@@ -265,10 +273,11 @@ export default function RepoWorkspacePage({
                                         <div className="px-3 py-2 text-xs text-red-400">
                                             <p>{filesError}</p>
                                             <button
-                                                onClick={() => void refreshMutation}
-                                                className="mt-2 rounded-md border border-[#2B2723] px-2 py-1 text-[#ECE7DF] hover:border-[#F5A524]"
+                                                onClick={() => void filesQuery.refetch()}
+                                                disabled={filesQuery.isFetching}
+                                                className="mt-2 rounded-md border border-[#2B2723] px-2 py-1 text-[#ECE7DF] hover:border-[#F5A524] disabled:cursor-not-allowed disabled:opacity-60"
                                             >
-                                                Retry
+                                                {filesQuery.isFetching ? "Retrying…" : "Retry"}
                                             </button>
                                         </div>
                                     )}
