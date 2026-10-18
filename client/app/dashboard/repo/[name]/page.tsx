@@ -1,18 +1,25 @@
 "use client";
 
-import { use, useCallback, useEffect, useMemo, useState } from "react";
-import { useSearchParams } from "next/navigation";
+import { use,  useMemo, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { Group, Panel } from "react-resizable-panels";
 import { sans, serif } from "@/app/config/font";
-import { Check, ChevronRight, ChevronDown, Copy, File, Folder, FolderOpen, Send, Sparkles } from "lucide-react";
+import { Check,  Copy, Send, Sparkles } from "lucide-react";
 import { Card, Handle } from "@/components/Panel";
 import { useAuth } from "@/context/AuthContext";
 import {
     getRepositoryFileContents,
     getRepositoryFiles,
 } from "@/api/github";
-import type { RepoFileEntry } from "@/types/github";
 import { buildFileTree, FileTreeNode } from "@/components/workspace/FileHandler";
+import FileViewer from "@/components/workspace/FileViewer";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useEffect } from "react";
+import { toast } from "sonner";
+import { disconnectGithub } from "@/api/user";
+import { GithubAuthProvider, unlink } from "firebase/auth";
+import { auth } from "@/app/config/firebase";
+import { isGithubTokenExpired } from "@/lib/github-session";
 
 export default function RepoWorkspacePage({
     params,
@@ -23,89 +30,144 @@ export default function RepoWorkspacePage({
     const repoName = resolvedParams.name;
     const searchParams = useSearchParams();
     const owner = searchParams.get("owner") ?? "";
-    const { getAuthToken } = useAuth();
+    const router = useRouter();
+    const { getAuthToken, fetchDbUser } = useAuth();
 
-    const [files, setFiles] = useState<RepoFileEntry[]>([]);
-    const [branch, setBranch] = useState("main");
-    const [truncated, setTruncated] = useState(false);
-    const [filesLoading, setFilesLoading] = useState(true);
-    const [filesError, setFilesError] = useState<string | null>(null);
-    const [activeFile, setActiveFile] = useState<string | null>(null);
-    const [fileContent, setFileContent] = useState<string>("");
-    const [contentLoading, setContentLoading] = useState(false);
-    const [contentError, setContentError] = useState<string | null>(null);
+    const [currentBranch, setCurrentBranch] = useState("main");
+
+    const [activeFile, setActiveFile] = useState<string | null>(null);  
     const [chatInput, setChatInput] = useState("");
     const [copied, setCopied] = useState(false);
 
-    const fetchFiles = useCallback(async () => {
-        if (!owner) {
-            setFilesError("Missing repository owner. Open this repo from the dashboard list.");
-            setFilesLoading(false);
-            return;
-        }
-        try {
-            setFilesLoading(true);
-            setFilesError(null);
+    const queryClient = useQueryClient();
+    const filesKey = ["repo-files", owner, repoName, currentBranch] as const;
+
+    /* ---------- File list ---------- */
+    const filesQuery = useQuery({
+        queryKey: filesKey,
+        enabled: !!owner,
+        retry: false,
+        queryFn: async () => {
+            if (!owner) {
+                throw new Error("Missing repository owner. Open this repo from the dashboard list.");
+            }
             const token = await getAuthToken();
             if (!token) {
-                setFilesError("You are not authenticated.");
-                return;
+                throw new Error("You are not authenticated.");
             }
-            const res = await getRepositoryFiles(token, owner, repoName, "main");
-            setBranch(res.data.branch);
-            setTruncated(res.data.truncated);
-            setFiles(res.data.files);
-            setActiveFile((prev) => {
-                if (prev && res.data.files.some((f) => f.path === prev)) return prev;
-                return res.data.files[0]?.path ?? null;
-            });
-        } catch (err) {
-            setFilesError(err instanceof Error ? err.message : "Failed to load files.");
-        } finally {
-            setFilesLoading(false);
-        }
-    }, [getAuthToken, owner, repoName]);
+            const res = await getRepositoryFiles(token, owner, repoName, currentBranch);
+            return res.data; // { files, branch, truncated }
+        },
+    });
 
-    useEffect(() => {
-        void fetchFiles();
-    }, [fetchFiles]);
+    const files = filesQuery.data?.files ?? [];
+    const branch = filesQuery.data?.branch ?? currentBranch;
+    const truncated = filesQuery.data?.truncated ?? false;
+    const filesLoading = filesQuery.isLoading;
+    const filesError = filesQuery.error?.message ?? null;
+    const filesExpired = isGithubTokenExpired(filesError);
 
+    // Token expired mid-session: auto-disconnect (same flow as sidebar/dashboard)
+    // and send user to the connect view. Expiry notice is toast-only.
     useEffect(() => {
+        if (!filesExpired) return;
         let cancelled = false;
-        async function loadContent() {
-            if (!activeFile || !owner) return;
+        (async () => {
             try {
-                setContentLoading(true);
-                setContentError(null);
+                const currentUser = auth.currentUser;
+                if (currentUser) {
+                    try {
+                        await unlink(currentUser, GithubAuthProvider.PROVIDER_ID);
+                    } catch {
+                        /* already unlinked — continue */
+                    }
+                }
                 const token = await getAuthToken();
-                if (!token) {
-                    if (!cancelled) setContentError("You are not authenticated.");
-                    return;
-                }
-                const res = await getRepositoryFileContents(
-                    token,
-                    owner,
-                    repoName,
-                    [activeFile],
-                    branch
-                );
-                if (!cancelled) {
-                    setFileContent(res.data[0]?.content ?? "");
-                }
-            } catch (err) {
-                if (!cancelled) {
-                    setContentError(err instanceof Error ? err.message : "Failed to load file content.");
-                    setFileContent("");
-                }
+                if (token) await disconnectGithub(token);
+            } catch {
+                /* best-effort revoke */
             } finally {
-                if (!cancelled) setContentLoading(false);
+                if (cancelled) return;
+                await fetchDbUser();
+                toast.warning("GitHub session expired — please reconnect.");
+                router.replace("/dashboard");
             }
-        }
-        void loadContent();
+        })();
         return () => {
             cancelled = true;
         };
-    }, [activeFile, branch, getAuthToken, owner, repoName]);
+    }, [filesExpired, fetchDbUser, getAuthToken, router]);
+
+
+    /* ---------- File content ---------- */
+    const contentQuery = useQuery({
+        queryKey: ["repo-content", owner, repoName, branch, activeFile],
+        enabled: !!activeFile,
+        staleTime: 30 * 60 * 1000,
+        retry: false,
+        queryFn: async () => {
+            const token = await getAuthToken();
+            if (!token) {
+                throw new Error("You are not authenticated.");
+            }
+            const res = await getRepositoryFileContents(
+                token,
+                owner,
+                repoName,
+                [activeFile as string],
+                branch
+            );
+            return res.data[0]?.content ?? "";
+        },
+    });
+
+    const fileContent = contentQuery.data ?? "";
+    const contentLoading = contentQuery.isLoading;
+    const contentError = contentQuery.error?.message ?? null;
+
+
+
+
+    /* ---------- Force Refresh ---------- */
+    const refreshMutation = useMutation({
+    mutationFn: async (file: string | null) => {
+        const token = await getAuthToken();
+        if (!token) throw new Error("You are not authenticated.");
+
+        // Same two API functions the queries use, run together
+        const [filesRes, contentRes] = await Promise.all([
+            getRepositoryFiles(token, owner, repoName, currentBranch),
+            file
+                ? getRepositoryFileContents(token, owner, repoName, [file], currentBranch)
+                : Promise.resolve(null),
+        ]);
+
+        return {
+            files: filesRes.data,
+            file,
+            content: contentRes?.data[0]?.content ?? "",
+        };
+    },
+    onSuccess: ({ files, file, content }) => {
+        // 1. Mark every cached file in this repo stale, but fetch nothing yet
+        queryClient.invalidateQueries({
+            queryKey: ["repo-content", owner, repoName,currentBranch],
+            refetchType: "none",
+        });
+        // 2. Write the fresh data (this also clears the stale mark on these entries)
+        queryClient.setQueryData(filesKey, files);
+        if (file) {
+            queryClient.setQueryData(
+                ["repo-content", owner, repoName, files.branch, file],
+                content
+            );
+        }
+    },
+
+});
+
+
+
 
     const fileLabel = useMemo(
         () => activeFile ?? "Select a file",
@@ -153,8 +215,8 @@ export default function RepoWorkspacePage({
                     {/* LEFT PANEL: Codebase Explorer & File Content */}
                     <Panel id="codebase-view" defaultSize={65} minSize={35}>
                         <Card
-                            title="Codebase Explorer"
-                            meta={fileLabel}
+                            title={"Codebase - " + `${fileLabel}`}
+                            // meta={fileLabel}
                             action={
                                 <div className="flex items-center gap-3">
                                     <span className="text-xs text-[#A39B90]">Read-only mode</span>
@@ -187,11 +249,11 @@ export default function RepoWorkspacePage({
                                     {filesLoading && (
                                         <p className="px-3 py-4 text-xs text-[#6F675D]">Loading files…</p>
                                     )}
-                                    {!filesLoading && filesError && (
+                                    {!filesLoading && filesError && !filesExpired && (
                                         <div className="px-3 py-2 text-xs text-red-400">
                                             <p>{filesError}</p>
                                             <button
-                                                onClick={() => void fetchFiles()}
+                                                onClick={() => void refreshMutation}
                                                 className="mt-2 rounded-md border border-[#2B2723] px-2 py-1 text-[#ECE7DF] hover:border-[#F5A524]"
                                             >
                                                 Retry
@@ -212,19 +274,12 @@ export default function RepoWorkspacePage({
                                 </div>
 
                                 {/* File Viewer with Sticky/Header Copy Action */}
-                                <div className="relative flex-1 overflow-auto bg-[#0E0D0C] p-4">
-                                    {contentLoading && (
-                                        <p className="font-mono text-xs text-[#6F675D]">Loading content…</p>
-                                    )}
-                                    {!contentLoading && contentError && (
-                                        <p className="font-mono text-xs text-red-400">{contentError}</p>
-                                    )}
-                                    {!contentLoading && !contentError && (
-                                        <pre className="font-mono text-xs leading-relaxed text-[#ECE7DF]">
-                                            <code>{fileContent || "Select a file to view its contents."}</code>
-                                        </pre>
-                                    )}
-                                </div>
+                                <FileViewer
+                                    activeFile={activeFile}
+                                    contentLoading={contentLoading}
+                                    contentError={contentError}
+                                    fileContent={fileContent}
+                                />
                             </div>
                         </Card>
                     </Panel>

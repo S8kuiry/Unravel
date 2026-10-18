@@ -22,6 +22,7 @@ import StatsStrip from "@/components/workspace/StatsStrip";
 import { getGithubProfile, getGithubRepositories } from "@/api/github";
 import SharedPanel from "@/components/workspace/Sharedpanel";
 import { RefreshCw } from "lucide-react";
+import { isGithubTokenExpired } from "@/lib/github-session";
 
 type Layout = Record<string, number>;
 
@@ -102,6 +103,30 @@ export default function WorkspacePage() {
   const [refreshedAt, setRefreshedAt] = useState(() => new Date().toISOString());
   const githubFetchInFlight = useRef<Promise<void> | null>(null);
 
+  // Auto-disconnect when the stored GitHub token has expired.
+  // Best-effort: unlink Firebase provider (ignore if already unlinked),
+  // revoke on backend, then fall back to the not-connected view.
+  // Expiry notice is toast-only.
+  const handleExpiredSession = useCallback(async () => {
+    try {
+      const currentUser = auth.currentUser;
+      if (currentUser) {
+        try {
+          await unlink(currentUser, GithubAuthProvider.PROVIDER_ID);
+        } catch {
+          /* already unlinked or not linked — continue to backend revoke */
+        }
+      }
+      const token = await getAuthToken();
+      if (token) await disconnectGithub(token);
+    } catch {
+      /* revoke is best-effort; UI still drops to connect state */
+    } finally {
+      await fetchDbUser();
+      toast.warning("GitHub session expired — please reconnect.");
+    }
+  }, [fetchDbUser, getAuthToken]);
+
   const fetchGithubData = useCallback(() => {
     if (!dbUser?.git_authorized) return Promise.resolve();
     if (githubFetchInFlight.current) return githubFetchInFlight.current;
@@ -134,7 +159,12 @@ export default function WorkspacePage() {
         }
       } catch (error: unknown) {
         console.error("Error fetching GitHub data:", error);
-        toast.error(error instanceof Error ? error.message : "Failed to load GitHub data");
+        const message = error instanceof Error ? error.message : "Failed to load GitHub data";
+        if (isGithubTokenExpired(message)) {
+          await handleExpiredSession();
+        } else {
+          toast.error(message);
+        }
       } finally {
         setIsLoading(false);
       }
@@ -150,7 +180,7 @@ export default function WorkspacePage() {
       }
     });
     return request;
-  }, [dbUser, getAuthToken]);
+  }, [dbUser, getAuthToken, handleExpiredSession]);
 
   useEffect(() => {
     if (dbUser?.git_authorized) {
@@ -235,7 +265,7 @@ export default function WorkspacePage() {
     }
   };
 
-  // Not connected view
+  // Not connected view.
   if (!dbUser.git_authorized) {
     return (
       <div className="mx-auto mt-20 max-w-md text-center">

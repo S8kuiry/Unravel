@@ -210,27 +210,33 @@ async def get_repository_files(
         db_repo = repo_res.scalars().first()
         await db.commit()
 
-    if db_repo:
-        # Upsert the file tree into RepoFile so your database knows what paths/shas belong to this branch
-        print(f"Saving {len(filtered_files)} files for repo ID: {db_repo.id}")
-        for file_info in filtered_files:
-            stmt = insert(RepoFile).values(
-                repo_id=db_repo.id,
-                branch=branch,
-                path=file_info["path"],
-                sha=file_info["sha"],
-                size=file_info["size"],
-            )
-            upsert_stmt = stmt.on_conflict_do_update(
-                index_elements=["repo_id", "branch", "path"],
-                set_={
-                    "sha": stmt.excluded.sha,
-                    "size": stmt.excluded.size,
-                }
-            )
-            await db.execute(upsert_stmt)
+    if db_repo and filtered_files:
+        print(f"Bulk saving {len(filtered_files)} files for repo ID: {db_repo.id}")
+        
+        # 1. Prepare all records as a list of dictionaries
+        file_records = [
+            {
+                "repo_id": db_repo.id,
+                "branch": branch,
+                "path": file_info["path"],
+                "sha": file_info["sha"],
+                "size": file_info["size"],
+            }
+            for file_info in filtered_files
+        ]
+        
+        # 2. Execute as a single bulk operation
+        stmt = insert(RepoFile).values(file_records)
+        upsert_stmt = stmt.on_conflict_do_update(
+            index_elements=["repo_id", "branch", "path"],
+            set_={
+                "sha": stmt.excluded.sha,
+                "size": stmt.excluded.size,
+            }
+        )
+        await db.execute(upsert_stmt)
         await db.commit()
-        print("Successfully committed files to DB!")
+        print("Successfully committed files in bulk!")
 
     return {
         "truncated": data.get("truncated", False),

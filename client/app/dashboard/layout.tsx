@@ -8,6 +8,7 @@ import Sidebar from "@/components/Sidebar";
 import type { SidebarUser } from "@/components/Sidebar";
 import { useAuth } from "@/context/AuthContext"; // adjust to wherever your AuthProvider file lives
 import { sans } from "@/app/config/font";
+import Providers from "@/components/Providers";
 
 // Indexed repos shown under "Ready to ask". Empty until the repositories table exists.
 // To preview the section, add: { name: "unravel-web", href: "/dashboard/repo/you/unravel-web" }
@@ -99,11 +100,16 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
 
       {/* The page sits on an inset canvas, like Linear or Gemini */}
       <div className="flex  min-h-screen flex-1 flex-col overflow-hidden bg-[#121110]  md:ml-0  md:border md:border-[#2B2723]">
-       
+
 
         {/* Pages render here and own their titles; the layout only supplies spacing */}
-        <main className="flex-1 mt-6 mb-2 overflow-y-auto scrollbar-none [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">          
-          <div className="mx-auto max-w-8xl px-8 pb-2 pt-2 md:px-8 min-h-screen">{children}</div>
+        <main className="flex-1 mt-6 mb-2 overflow-y-auto scrollbar-none [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
+          <div className="mx-auto max-w-8xl px-8 pb-2 pt-2 md:px-8 min-h-screen">
+            <Providers>
+              {children}
+            </Providers>
+
+          </div>
         </main>
       </div>
     </div>
