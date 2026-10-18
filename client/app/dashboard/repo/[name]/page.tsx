@@ -1,10 +1,10 @@
 "use client";
 
-import { use,  useMemo, useState } from "react";
+import { use, useMemo, useState, useCallback } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Group, Panel } from "react-resizable-panels";
 import { sans, serif } from "@/app/config/font";
-import { Check,  Copy, Send, Sparkles } from "lucide-react";
+import { Check, Copy, Send, Sparkles } from "lucide-react";
 import { Card, Handle } from "@/components/Panel";
 import { useAuth } from "@/context/AuthContext";
 import {
@@ -20,6 +20,7 @@ import { disconnectGithub } from "@/api/user";
 import { GithubAuthProvider, unlink } from "firebase/auth";
 import { auth } from "@/app/config/firebase";
 import { isGithubTokenExpired } from "@/lib/github-session";
+import { useExpandedFolders } from "@/lib/useExpandedFolders";
 
 export default function RepoWorkspacePage({
     params,
@@ -32,15 +33,26 @@ export default function RepoWorkspacePage({
     const owner = searchParams.get("owner") ?? "";
     const router = useRouter();
     const { getAuthToken, fetchDbUser } = useAuth();
-
     const [currentBranch, setCurrentBranch] = useState("main");
-
-    const [activeFile, setActiveFile] = useState<string | null>(null);  
+    // const [activeFile, setActiveFile] = useState<string | null>(null);  
+    const activeFile = searchParams.get("file");
     const [chatInput, setChatInput] = useState("");
     const [copied, setCopied] = useState(false);
-
     const queryClient = useQueryClient();
     const filesKey = ["repo-files", owner, repoName, currentBranch] as const;
+    const { expanded, toggle: toggleFolder } = useExpandedFolders(
+        `unravel:expanded:${owner}/${repoName}:${currentBranch}`,
+        activeFile
+    );
+
+
+    /* ---------- File Select Function ---------- */
+    const handleSelectFile = useCallback((path: string) => {
+        const params = new URLSearchParams(window.location.search);
+        params.set("file", path);
+        window.history.replaceState(null, "", `${window.location.pathname}?${params.toString()}`);
+    }, []);
+
 
     /* ---------- File list ---------- */
     const filesQuery = useQuery({
@@ -102,7 +114,7 @@ export default function RepoWorkspacePage({
     /* ---------- File content ---------- */
     const contentQuery = useQuery({
         queryKey: ["repo-content", owner, repoName, branch, activeFile],
-        enabled: !!activeFile,
+        enabled: !!activeFile && filesQuery.isSuccess,
         staleTime: 30 * 60 * 1000,
         retry: false,
         queryFn: async () => {
@@ -130,41 +142,41 @@ export default function RepoWorkspacePage({
 
     /* ---------- Force Refresh ---------- */
     const refreshMutation = useMutation({
-    mutationFn: async (file: string | null) => {
-        const token = await getAuthToken();
-        if (!token) throw new Error("You are not authenticated.");
+        mutationFn: async (file: string | null) => {
+            const token = await getAuthToken();
+            if (!token) throw new Error("You are not authenticated.");
 
-        // Same two API functions the queries use, run together
-        const [filesRes, contentRes] = await Promise.all([
-            getRepositoryFiles(token, owner, repoName, currentBranch),
-            file
-                ? getRepositoryFileContents(token, owner, repoName, [file], currentBranch)
-                : Promise.resolve(null),
-        ]);
+            // Same two API functions the queries use, run together
+            const [filesRes, contentRes] = await Promise.all([
+                getRepositoryFiles(token, owner, repoName, currentBranch),
+                file
+                    ? getRepositoryFileContents(token, owner, repoName, [file], currentBranch)
+                    : Promise.resolve(null),
+            ]);
 
-        return {
-            files: filesRes.data,
-            file,
-            content: contentRes?.data[0]?.content ?? "",
-        };
-    },
-    onSuccess: ({ files, file, content }) => {
-        // 1. Mark every cached file in this repo stale, but fetch nothing yet
-        queryClient.invalidateQueries({
-            queryKey: ["repo-content", owner, repoName,currentBranch],
-            refetchType: "none",
-        });
-        // 2. Write the fresh data (this also clears the stale mark on these entries)
-        queryClient.setQueryData(filesKey, files);
-        if (file) {
-            queryClient.setQueryData(
-                ["repo-content", owner, repoName, files.branch, file],
-                content
-            );
-        }
-    },
+            return {
+                files: filesRes.data,
+                file,
+                content: contentRes?.data[0]?.content ?? "",
+            };
+        },
+        onSuccess: ({ files, file, content }) => {
+            // 1. Mark every cached file in this repo stale, but fetch nothing yet
+            queryClient.invalidateQueries({
+                queryKey: ["repo-content", owner, repoName, currentBranch],
+                refetchType: "none",
+            });
+            // 2. Write the fresh data (this also clears the stale mark on these entries)
+            queryClient.setQueryData(filesKey, files);
+            if (file) {
+                queryClient.setQueryData(
+                    ["repo-content", owner, repoName, files.branch, file],
+                    content
+                );
+            }
+        },
 
-});
+    });
 
 
 
@@ -268,7 +280,9 @@ export default function RepoWorkspacePage({
                                             key={node.path}
                                             node={node}
                                             activeFile={activeFile}
-                                            onSelectFile={setActiveFile}
+                                            onSelectFile={handleSelectFile}
+                                            expanded={expanded}
+                                            onToggleFolder={toggleFolder}
                                         />
                                     ))}
                                 </div>

@@ -1,6 +1,5 @@
 import { RepoFileEntry } from "@/types/github";
-import { Check, ChevronRight, ChevronDown, Copy, File, Folder, FolderOpen, Send, Sparkles } from "lucide-react";
-import { useState } from "react";
+import { ChevronRight, ChevronDown, Copy, File, Folder, FolderOpen, Send, Sparkles } from "lucide-react";
 
 interface TreeNode {
     name: string;
@@ -57,14 +56,18 @@ export function FileTreeNode({
     node,
     activeFile,
     onSelectFile,
+    expanded,
+    onToggleFolder,
     level = 0,
 }: {
     node: TreeNode;
     activeFile: string | null;
     onSelectFile: (path: string) => void;
+    expanded: Set<string>;
+    onToggleFolder: (path: string) => void;
     level?: number;
 }) {
-    const [isOpen, setIsOpen] = useState(false);
+    const isOpen = expanded.has(node.path);
 
     if (node.type === "file") {
         const isSelected = activeFile === node.path;
@@ -74,8 +77,8 @@ export function FileTreeNode({
                 title={node.path}
                 style={{ paddingLeft: `${level * 12 + 8}px` }}
                 className={`flex w-full items-center gap-2 pr-2 py-1.5 text-xs transition-colors hover:bg-[#211E1B] ${isSelected
-                        ? "bg-[#211E1B] font-medium text-[#F5A524]"
-                        : "text-[#A39B90]"
+                    ? "bg-[#211E1B] font-medium text-[#F5A524]"
+                    : "text-[#A39B90]"
                     }`}
             >
                 <File className="h-3.5 w-3.5 shrink-0" />
@@ -87,7 +90,7 @@ export function FileTreeNode({
     return (
         <div>
             <button
-                onClick={() => setIsOpen(!isOpen)}
+                onClick={() => onToggleFolder(node.path)}
                 style={{ paddingLeft: `${level * 12 + 8}px` }}
                 className="flex w-full items-center gap-1.5 pr-2 py-1.5 text-xs text-[#ECE7DF] transition-colors hover:bg-[#211E1B]"
             >
@@ -113,6 +116,8 @@ export function FileTreeNode({
                                 node={child}
                                 activeFile={activeFile}
                                 onSelectFile={onSelectFile}
+                                expanded={expanded}
+                                onToggleFolder={onToggleFolder}
                                 level={level + 1}
                             />
                         ))}
