@@ -270,12 +270,12 @@ export default function RepoWorkspacePage({
                                         <p className="px-3 py-4 text-xs text-[#6F675D]">Loading files…</p>
                                     )}
                                     {!filesLoading && filesError && !filesExpired && (
-                                        <div className="px-3 py-2 text-xs text-red-400">
+                                        <div className="px-3 py-2 text-[10px] text-red-400">
                                             <p>{filesError}</p>
                                             <button
                                                 onClick={() => void filesQuery.refetch()}
                                                 disabled={filesQuery.isFetching}
-                                                className="mt-2 rounded-md border border-[#2B2723] px-2 py-1 text-[#ECE7DF] hover:border-[#F5A524] disabled:cursor-not-allowed disabled:opacity-60"
+                                                className="mt-2  cursor-pointer rounded-md border border-[#2B2723] px-2 py-1.5 text-[#ECE7DF] hover:border-[#F5A524] disabled:cursor-not-allowed disabled:opacity-60"
                                             >
                                                 {filesQuery.isFetching ? "Retrying…" : "Retry"}
                                             </button>

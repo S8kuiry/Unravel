@@ -32,10 +32,10 @@ export type SidebarUser = {
 // Professional navigation routes matching the folder structure
 const NAV_ITEMS = [
   { name: "Workspace", href: "/dashboard", icon: LayoutDashboard },
-  { name: "Codebases", href: "/dashboard/repositories", icon: FolderGit2 },
-  { name: "Data Ingestion", href: "/dashboard/ingestion", icon: Database },
-  { name: "Audit Logs", href: "/dashboard/activity", icon: Activity },
-  { name: "Preferences", href: "/dashboard/settings", icon: Settings },
+  // { name: "Codebases", href: "/dashboard/repositories", icon: FolderGit2 },
+  // { name: "Data Ingestion", href: "/dashboard/ingestion", icon: Database },
+  // { name: "Audit Logs", href: "/dashboard/activity", icon: Activity },
+  // { name: "Preferences", href: "/dashboard/settings", icon: Settings },
 ];
 
 type Props = {
@@ -87,9 +87,9 @@ function Avatar({ src, initials, size }: { src: string | null; initials: string;
 }
 
 export default function Sidebar({
-  collapsed, mobileOpen, onToggle, onCloseMobile, user, githubConnected, readyRepos, onDisconnect, onSignOut,
+  collapsed, mobileOpen, onToggle, onCloseMobile, user, githubConnected, readyRepos, onSignOut,
 }: Props) {
-  const { dbUser, getAuthToken, fetchDbUser } = useAuth();
+  const {  getAuthToken, fetchDbUser } = useAuth();
   const pathname = usePathname();
   const [menuOpen, setMenuOpen] = useState(false);
   const [confirming, setConfirming] = useState(false);

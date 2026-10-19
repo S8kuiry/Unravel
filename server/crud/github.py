@@ -2,7 +2,7 @@ from typing import Optional
 import httpx
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
-from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy.dialects.postgresql import insert,delete
 import asyncio
 from urllib.parse import quote
 from models.user import User
@@ -426,247 +426,286 @@ async def get_repository_file_contents(
 
         return await asyncio.gather(*(fetch_single_file(p) for p in paths))
 
+
+
+async def get_opened_repositories(
+    db: AsyncSession,
+    firebase_uid: str,
+):
+    result = await db.execute(
+        select(Repository)
+        .where(Repository.user_uid == firebase_uid)
+        .order_by(Repository.last_opened_at.desc())
+    )
+
+    return [
+        {
+            "id": str(repo.id),
+            "owner": repo.owner,
+            "name": repo.name,
+            "last_opened_at": repo.last_opened_at,
+        }
+        for repo in result.scalars().all()
+    ]
+
+
+async def delete_repo_by_id(
+    db: AsyncSession,
+    firebase_uid: str,
+    repo_id: str,
+) -> bool:
+    result = await db.execute(
+        delete(Repository).where(
+            Repository.id == repo_id,
+            Repository.user_uid == firebase_uid,
+        )
+    )
+
+    await db.commit()
+
+    return result.rowcount > 0
+
 # ---------------------------------------------------------
 # COLLABORATOR REPOSITORIES
 # ---------------------------------------------------------
 
-async def get_collaborator_repositories(
-    db: AsyncSession,
-    firebase_uid: str,
-):
-    """
-    Fetch repositories where the authenticated GitHub user
-    has collaborator access.
+# async def get_collaborator_repositories(
+#     db: AsyncSession,
+#     firebase_uid: str,
+# ):
+#     """
+#     Fetch repositories where the authenticated GitHub user
+#     has collaborator access.
 
-    Does NOT include repositories owned by the user.
-    Does NOT include organization repositories.
-    """
+#     Does NOT include repositories owned by the user.
+#     Does NOT include organization repositories.
+#     """
 
-    token = await get_github_token(
-        db=db,
-        firebase_uid=firebase_uid,
-    )
+#     token = await get_github_token(
+#         db=db,
+#         firebase_uid=firebase_uid,
+#     )
 
-    if not token:
-        return None
+#     if not token:
+#         return None
 
-    async with make_client() as client:
+#     async with make_client() as client:
 
 
-        response = await client.get(
-            f"{GITHUB_API_URL}/user/repos",
-            headers=github_headers(token),
-            params={
-                "affiliation": "collaborator",
-                "visibility": "all",
-                "sort": "updated",
-                "per_page": 100,
-            },
-        )
+#         response = await client.get(
+#             f"{GITHUB_API_URL}/user/repos",
+#             headers=github_headers(token),
+#             params={
+#                 "affiliation": "collaborator",
+#                 "visibility": "all",
+#                 "sort": "updated",
+#                 "per_page": 100,
+#             },
+#         )
 
-    if response.status_code == 401:
-        raise ValueError("GitHub token is invalid or expired")
+#     if response.status_code == 401:
+#         raise ValueError("GitHub token is invalid or expired")
 
-    response.raise_for_status()
+#     response.raise_for_status()
 
-    return response.json()
+#     return response.json()
 
 
 # ---------------------------------------------------------
 # ORGANIZATIONS
 # ---------------------------------------------------------
 
-async def get_github_organizations(
-    db: AsyncSession,
-    firebase_uid: str,
-):
-    """
-    Fetch organizations that the authenticated GitHub user
-    belongs to.
-    """
+# async def get_github_organizations(
+#     db: AsyncSession,
+#     firebase_uid: str,
+# ):
+#     """
+#     Fetch organizations that the authenticated GitHub user
+#     belongs to.
+#     """
 
-    token = await get_github_token(
-        db=db,
-        firebase_uid=firebase_uid,
-    )
+#     token = await get_github_token(
+#         db=db,
+#         firebase_uid=firebase_uid,
+#     )
 
-    if not token:
-        return None
+#     if not token:
+#         return None
 
-    async with make_client() as client:
-
-
-        response = await client.get(
-            f"{GITHUB_API_URL}/user/orgs",
-            headers=github_headers(token),
-            params={
-                "per_page": 100,
-            },
-        )
-
-    if response.status_code == 401:
-        raise ValueError("GitHub token is invalid or expired")
-    print("ORGS STATUS:", response.status_code, response.text)
+#     async with make_client() as client:
 
 
-    response.raise_for_status()
+#         response = await client.get(
+#             f"{GITHUB_API_URL}/user/orgs",
+#             headers=github_headers(token),
+#             params={
+#                 "per_page": 100,
+#             },
+#         )
+
+#     if response.status_code == 401:
+#         raise ValueError("GitHub token is invalid or expired")
+#     print("ORGS STATUS:", response.status_code, response.text)
+
+
+#     response.raise_for_status()
     
 
-    return response.json()
+#     return response.json()
 
 
 # ---------------------------------------------------------
 # ORGANIZATION REPOSITORIES
 # ---------------------------------------------------------
 
-async def get_organization_repositories(
-    db: AsyncSession,
-    firebase_uid: str,
-    organization: str,
-):
-    """
-    Fetch repositories from a GitHub organization.
+# async def get_organization_repositories(
+#     db: AsyncSession,
+#     firebase_uid: str,
+#     organization: str,
+# ):
+#     """
+#     Fetch repositories from a GitHub organization.
 
-    The user's GitHub token determines which repositories
-    they are actually allowed to see.
-    """
+#     The user's GitHub token determines which repositories
+#     they are actually allowed to see.
+#     """
 
-    token = await get_github_token(
-        db=db,
-        firebase_uid=firebase_uid,
-    )
+#     token = await get_github_token(
+#         db=db,
+#         firebase_uid=firebase_uid,
+#     )
 
-    if not token:
-        return None
+#     if not token:
+#         return None
 
-    async with make_client() as client:
+#     async with make_client() as client:
 
 
-        response = await client.get(
-            f"{GITHUB_API_URL}/orgs/{organization}/repos",
-            headers=github_headers(token),
-            params={
-                "type": "all",
-                "sort": "updated",
-                "per_page": 100,
-            },
-        )
+#         response = await client.get(
+#             f"{GITHUB_API_URL}/orgs/{organization}/repos",
+#             headers=github_headers(token),
+#             params={
+#                 "type": "all",
+#                 "sort": "updated",
+#                 "per_page": 100,
+#             },
+#         )
 
-    if response.status_code == 401:
-        raise ValueError("GitHub token is invalid or expired")
+#     if response.status_code == 401:
+#         raise ValueError("GitHub token is invalid or expired")
 
-    if response.status_code == 403:
-        raise ValueError(
-            "GitHub organization access is not approved"
-        )
+#     if response.status_code == 403:
+#         raise ValueError(
+#             "GitHub organization access is not approved"
+#         )
 
-    if response.status_code == 404:
-        raise ValueError(
-            "Organization not found or user does not have access"
-        )
+#     if response.status_code == 404:
+#         raise ValueError(
+#             "Organization not found or user does not have access"
+#         )
 
-    response.raise_for_status()
+#     response.raise_for_status()
 
-    return response.json()
+#     return response.json()
 
 
 # ---------------------------------------------------------
 # SHARED REPOSITORIES
 # ---------------------------------------------------------
 
-async def get_shared_repositories(
-    db: AsyncSession,
-    firebase_uid: str,
-):
-    """
-    Fetch repositories that are shared with the user.
+# async def get_shared_repositories(
+#     db: AsyncSession,
+#     firebase_uid: str,
+# ):
+#     """
+#     Fetch repositories that are shared with the user.
 
-    This combines:
-      - collaborator repositories
-      - organization repositories
+#     This combines:
+#       - collaborator repositories
+#       - organization repositories
 
-    User-owned repositories are excluded.
-    """
+#     User-owned repositories are excluded.
+#     """
 
-    token = await get_github_token(
-        db=db,
-        firebase_uid=firebase_uid,
-    )
+#     token = await get_github_token(
+#         db=db,
+#         firebase_uid=firebase_uid,
+#     )
 
-    if not token:
-        return None
+#     if not token:
+#         return None
 
-    async with make_client() as client:
+#     async with make_client() as client:
 
 
-        # 1. Collaborator repositories
-        collaborator_response = await client.get(
-            f"{GITHUB_API_URL}/user/repos",
-            headers=github_headers(token),
-            params={
-                "affiliation": "collaborator",
-                "visibility": "all",
-                "sort": "updated",
-                "per_page": 100,
-            },
-        )
+#         # 1. Collaborator repositories
+#         collaborator_response = await client.get(
+#             f"{GITHUB_API_URL}/user/repos",
+#             headers=github_headers(token),
+#             params={
+#                 "affiliation": "collaborator",
+#                 "visibility": "all",
+#                 "sort": "updated",
+#                 "per_page": 100,
+#             },
+#         )
 
-        if collaborator_response.status_code == 401:
-            raise ValueError(
-                "GitHub token is invalid or expired"
-            )
+#         if collaborator_response.status_code == 401:
+#             raise ValueError(
+#                 "GitHub token is invalid or expired"
+#             )
 
-        collaborator_response.raise_for_status()
+#         collaborator_response.raise_for_status()
 
-        collaborator_repos = collaborator_response.json()
+#         collaborator_repos = collaborator_response.json()
 
-        # 2. Organizations
-        org_response = await client.get(
-            f"{GITHUB_API_URL}/user/orgs",
-            headers=github_headers(token),
-            params={
-                "per_page": 100,
-            },
-        )
+#         # 2. Organizations
+#         org_response = await client.get(
+#             f"{GITHUB_API_URL}/user/orgs",
+#             headers=github_headers(token),
+#             params={
+#                 "per_page": 100,
+#             },
+#         )
 
-        if org_response.status_code == 401:
-            raise ValueError(
-                "GitHub token is invalid or expired"
-            )
+#         if org_response.status_code == 401:
+#             raise ValueError(
+#                 "GitHub token is invalid or expired"
+#             )
 
-        org_response.raise_for_status()
+#         org_response.raise_for_status()
 
-        organizations = org_response.json()
+#         organizations = org_response.json()
 
-        # 3. Fetch organization repositories
-        organization_repos = []
+#         # 3. Fetch organization repositories
+#         organization_repos = []
 
-        for organization in organizations:
+#         for organization in organizations:
 
-            org_login = organization["login"]
+#             org_login = organization["login"]
 
-            response = await client.get(
-                f"{GITHUB_API_URL}/orgs/{org_login}/repos",
-                headers=github_headers(token),
-                params={
-                    "type": "all",
-                    "sort": "updated",
-                    "per_page": 100,
-                },
-            )
+#             response = await client.get(
+#                 f"{GITHUB_API_URL}/orgs/{org_login}/repos",
+#                 headers=github_headers(token),
+#                 params={
+#                     "type": "all",
+#                     "sort": "updated",
+#                     "per_page": 100,
+#                 },
+#             )
 
-            # Organization may restrict repository access.
-            if response.status_code in (403, 404):
-                continue
+#             # Organization may restrict repository access.
+#             if response.status_code in (403, 404):
+#                 continue
 
-            response.raise_for_status()
+#             response.raise_for_status()
 
-            repos = response.json()
+#             repos = response.json()
 
-            organization_repos.extend(repos)
+#             organization_repos.extend(repos)
 
-    return {
-        "collaborator_repositories": collaborator_repos,
-        "organization_repositories": organization_repos,
-        "organizations": organizations,
-    }
+#     return {
+#         "collaborator_repositories": collaborator_repos,
+#         "organization_repositories": organization_repos,
+#         "organizations": organizations,
+#     }

@@ -6,12 +6,10 @@ from security.auth import get_current_uid
 from crud.github import (
     get_github_profile,
     get_github_repositories,
-    get_github_organizations,
-    get_collaborator_repositories,
-    get_organization_repositories,
-    get_shared_repositories,
     get_repository_files,
-    get_repository_file_contents
+    get_repository_file_contents,
+    get_opened_repositories,
+    delete_repo_by_id
 )
 from models.github import FileContentsRequest
 
@@ -197,162 +195,211 @@ async def repository_file_contents(
         )
 
 
-@router.get("/collaborator-repositories")
-async def collaborator_repositories(
+@router.get("/opened-repositories")
+async def opened_repositories(
     uid: str = Depends(get_current_uid),
     db: AsyncSession = Depends(get_db),
 ):
     try:
-        repositories = await get_collaborator_repositories(
-            db=db,
-            firebase_uid=uid,
-        )
-
-        if repositories is None:
-            raise HTTPException(
-                status_code=403,
-                detail="GitHub access is not authorized",
-            )
+        res = await get_opened_repositories(db, uid)
 
         return {
             "status": "success",
-            "message": "Collaborator repositories fetched successfully",
-            "data": repositories,
+            "message": "Opened repositories fetched successfully",
+            "data": res,
         }
-
     except ValueError as e:
-        raise HTTPException(
-            status_code=401,
-            detail=str(e),
-        )
-
+            raise HTTPException(status_code=403, detail=str(e))
+    
     except HTTPException:
-        raise
+            raise
+    
+    except Exception as e:
+            import traceback
+            traceback.print_exc()
+            raise HTTPException(
+                status_code=500,
+                detail="Failed to fetch file contents",
+            )
 
-    except Exception:
-        raise HTTPException(
-            status_code=500,
-            detail="Failed to fetch collaborator repositories",
-        )
 
-
-@router.get("/organizations")
-async def github_organizations(
+@router.delete("/repositories/{repo_id}")
+async def delete_repository_endpoint(
+    repo_id: str,
     uid: str = Depends(get_current_uid),
     db: AsyncSession = Depends(get_db),
 ):
-    try:
-        organizations = await get_github_organizations(
-            db=db,
-            firebase_uid=uid,
-        )
+    deleted = await delete_repo_by_id(db, uid, repo_id)
 
-        if organizations is None:
-            raise HTTPException(
-                status_code=403,
-                detail="GitHub access is not authorized",
-            )
-
-        return {
-            "status": "success",
-            "message": "GitHub organizations fetched successfully",
-            "data": organizations,
-        }
-
-    except ValueError as e:
+    if not deleted:
         raise HTTPException(
-            status_code=401,
-            detail=str(e),
+            status_code=404,
+            detail="Repository not found",
         )
 
-    except HTTPException:
-        raise
+    return {
+        "status": "success",
+        "message": "Repository deleted successfully",
+    }
 
-    except Exception:
-        raise HTTPException(
-            status_code=500,
-            detail="Failed to fetch GitHub organizations",
-        )
+    
 
+# @router.get("/collaborator-repositories")
+# async def collaborator_repositories(
+#     uid: str = Depends(get_current_uid),
+#     db: AsyncSession = Depends(get_db),
+# ):
+#     try:
+#         repositories = await get_collaborator_repositories(
+#             db=db,
+#             firebase_uid=uid,
+#         )
 
-@router.get("/organizations/{organization}/repositories")
-async def organization_repositories(
-    organization: str,
-    uid: str = Depends(get_current_uid),
-    db: AsyncSession = Depends(get_db),
-):
-    try:
-        repositories = await get_organization_repositories(
-            db=db,
-            firebase_uid=uid,
-            organization=organization,
-        )
+#         if repositories is None:
+#             raise HTTPException(
+#                 status_code=403,
+#                 detail="GitHub access is not authorized",
+#             )
 
-        if repositories is None:
-            raise HTTPException(
-                status_code=403,
-                detail="GitHub access is not authorized",
-            )
+#         return {
+#             "status": "success",
+#             "message": "Collaborator repositories fetched successfully",
+#             "data": repositories,
+#         }
 
-        return {
-            "status": "success",
-            "message": "Organization repositories fetched successfully",
-            "data": repositories,
-        }
+#     except ValueError as e:
+#         raise HTTPException(
+#             status_code=401,
+#             detail=str(e),
+#         )
 
-    except ValueError as e:
-        raise HTTPException(
-            status_code=403,
-            detail=str(e),
-        )
+#     except HTTPException:
+#         raise
 
-    except HTTPException:
-        raise
-
-    except Exception:
-        raise HTTPException(
-            status_code=500,
-            detail="Failed to fetch organization repositories",
-        )
+#     except Exception:
+#         raise HTTPException(
+#             status_code=500,
+#             detail="Failed to fetch collaborator repositories",
+#         )
 
 
-@router.get("/shared-repositories")
-async def shared_repositories(
-    uid: str = Depends(get_current_uid),
-    db: AsyncSession = Depends(get_db),
-):
-    try:
-        repositories = await get_shared_repositories(
-            db=db,
-            firebase_uid=uid,
-        )
+# @router.get("/organizations")
+# async def github_organizations(
+#     uid: str = Depends(get_current_uid),
+#     db: AsyncSession = Depends(get_db),
+# ):
+#     try:
+#         organizations = await get_github_organizations(
+#             db=db,
+#             firebase_uid=uid,
+#         )
 
-        if repositories is None:
-            raise HTTPException(
-                status_code=403,
-                detail="GitHub access is not authorized",
-            )
+#         if organizations is None:
+#             raise HTTPException(
+#                 status_code=403,
+#                 detail="GitHub access is not authorized",
+#             )
 
-        return {
-            "status": "success",
-            "message": "Shared repositories fetched successfully",
-            "data": repositories,
-        }
+#         return {
+#             "status": "success",
+#             "message": "GitHub organizations fetched successfully",
+#             "data": organizations,
+#         }
 
-    except ValueError as e:
-        raise HTTPException(
-            status_code=401,
-            detail=str(e),
-        )
+#     except ValueError as e:
+#         raise HTTPException(
+#             status_code=401,
+#             detail=str(e),
+#         )
 
-    except HTTPException:
-        raise
+#     except HTTPException:
+#         raise
 
-    except Exception:
-        raise HTTPException(
-            status_code=500,
-            detail="Failed to fetch shared repositories",
-        )
+#     except Exception:
+#         raise HTTPException(
+#             status_code=500,
+#             detail="Failed to fetch GitHub organizations",
+#         )
+
+
+# @router.get("/organizations/{organization}/repositories")
+# async def organization_repositories(
+#     organization: str,
+#     uid: str = Depends(get_current_uid),
+#     db: AsyncSession = Depends(get_db),
+# ):
+#     try:
+#         repositories = await get_organization_repositories(
+#             db=db,
+#             firebase_uid=uid,
+#             organization=organization,
+#         )
+
+#         if repositories is None:
+#             raise HTTPException(
+#                 status_code=403,
+#                 detail="GitHub access is not authorized",
+#             )
+
+#         return {
+#             "status": "success",
+#             "message": "Organization repositories fetched successfully",
+#             "data": repositories,
+#         }
+
+#     except ValueError as e:
+#         raise HTTPException(
+#             status_code=403,
+#             detail=str(e),
+#         )
+
+#     except HTTPException:
+#         raise
+
+#     except Exception:
+#         raise HTTPException(
+#             status_code=500,
+#             detail="Failed to fetch organization repositories",
+#         )
+
+
+# @router.get("/shared-repositories")
+# async def shared_repositories(
+#     uid: str = Depends(get_current_uid),
+#     db: AsyncSession = Depends(get_db),
+# ):
+#     try:
+#         repositories = await get_shared_repositories(
+#             db=db,
+#             firebase_uid=uid,
+#         )
+
+#         if repositories is None:
+#             raise HTTPException(
+#                 status_code=403,
+#                 detail="GitHub access is not authorized",
+#             )
+
+#         return {
+#             "status": "success",
+#             "message": "Shared repositories fetched successfully",
+#             "data": repositories,
+#         }
+
+#     except ValueError as e:
+#         raise HTTPException(
+#             status_code=401,
+#             detail=str(e),
+#         )
+
+#     except HTTPException:
+#         raise
+
+#     except Exception:
+#         raise HTTPException(
+#             status_code=500,
+#             detail="Failed to fetch shared repositories",
+#         )
 
 
 
