@@ -45,7 +45,7 @@ type Props = {
   onCloseMobile: () => void;
   user: SidebarUser;
   githubConnected: boolean;
-  readyRepos: { name: string; href: string }[];
+  readyRepos: { name: string; href: string; lastOpenedAt?: string }[];
   onDisconnect: () => Promise<void> | void;
   onSignOut: () => Promise<void>;
 };

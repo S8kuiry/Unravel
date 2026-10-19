@@ -1,5 +1,6 @@
 from typing import Optional
 import httpx
+import uuid
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy.dialects.postgresql import insert,delete
@@ -130,6 +131,17 @@ async def get_github_repositories(
 
 
 
+async def touch_last_opened(db: AsyncSession, repo: Repository) -> None:
+    """Stamp last_opened_at = now() so the last-opened section never sees NULL.
+
+    Called on every user-visible open path (files list + file contents).
+    Uses flush (not commit) so the caller controls the transaction and no
+    unflushed file/sync rows are lost.
+    """
+    repo.last_opened_at = _utcnow()
+    await db.flush()
+
+
 async def get_or_create_repository(
     db: AsyncSession,
     token: str,
@@ -146,6 +158,8 @@ async def get_or_create_repository(
     )
     db_repo = result.scalars().first()
     if db_repo:
+        # Every open counts: keep last_opened_at fresh (fixes legacy NULL rows).
+        await touch_last_opened(db, db_repo)
         return db_repo
 
     # First time this user opens this repo: ask GitHub for the real details
@@ -169,6 +183,7 @@ async def get_or_create_repository(
         name=repo,
         is_private=info.get("private", False),
         default_branch=info.get("default_branch", "main"),
+        last_opened_at=_utcnow(),
     )
     stmt = stmt.on_conflict_do_update(
         index_elements=["user_uid", "github_id"],
@@ -177,12 +192,14 @@ async def get_or_create_repository(
             "name": stmt.excluded.name,
             "is_private": stmt.excluded.is_private,
             "default_branch": stmt.excluded.default_branch,
+            "last_opened_at": stmt.excluded.last_opened_at,
         },
     ).returning(Repository)
 
     res = await db.execute(stmt)
     db_repo = res.scalars().first()
     await db.commit()
+    await db.refresh(db_repo)
     return db_repo
 
 
@@ -239,10 +256,13 @@ async def get_repository_files(
         return None
 
     db_repo = await get_or_create_repository(db, token, firebase_uid, owner, repo)
+    # NOTE: get_or_create_repository already stamped last_opened_at via
+    # touch_last_opened(), so even the cached early-return below is fresh.
 
     if not force:
         cached = await read_cached_files(db, db_repo.id, branch)
         if cached is not None:
+            await db.commit()  # persist the last_opened_at touch from get_or_create
             return cached
         
 
@@ -317,6 +337,11 @@ async def get_repository_files(
     )
     await db.commit()
 
+    # Refresh the open timestamp after a successful sync as well (covers the
+    # full-fetch path even if the earlier touch committed before GitHub I/O).
+    await touch_last_opened(db, db_repo)
+    await db.commit()
+
     return {
         "truncated": data.get("truncated", False),
         "branch": branch,
@@ -351,6 +376,9 @@ async def get_repository_file_contents(
     db_repo = repo_result.scalars().first()
     if not db_repo:
         raise ValueError("Repository not found in database")
+
+    # Opening file contents counts as opening the repo.
+    await touch_last_opened(db, db_repo)
 
     headers = {
         **github_headers(token),
@@ -435,24 +463,46 @@ async def get_opened_repositories(
     result = await db.execute(
         select(Repository)
         .where(Repository.user_uid == firebase_uid)
-        .order_by(Repository.last_opened_at.desc())
-    )
+        .order_by(
+            Repository.last_opened_at.desc().nulls_last(),
+            Repository.created_at.desc(),
+        )    )
+
+    repos = result.scalars().all()
+
+    # Self-heal legacy rows: if last_opened_at is NULL, fall back to created_at
+    # so the "last opened" section always has a usable timestamp for fetching.
+    # The next real open will overwrite this via touch_last_opened().
+    needs_backfill = [r for r in repos if r.last_opened_at is None]
+    if needs_backfill:
+        now = _utcnow()
+        for r in needs_backfill:
+            fallback = r.created_at or now
+            await db.execute(
+                Repository.__table__.update()
+                .where(Repository.id == r.id)
+                .values(last_opened_at=fallback)
+            )
+            r.last_opened_at = fallback
+        await db.commit()
 
     return [
         {
             "id": str(repo.id),
             "owner": repo.owner,
             "name": repo.name,
-            "last_opened_at": repo.last_opened_at,
+            "last_opened_at": (
+                repo.last_opened_at.isoformat() if repo.last_opened_at else None
+            ),
         }
-        for repo in result.scalars().all()
+        for repo in repos
     ]
 
 
 async def delete_repo_by_id(
     db: AsyncSession,
     firebase_uid: str,
-    repo_id: str,
+    repo_id: uuid.UUID,
 ) -> bool:
     result = await db.execute(
         delete(Repository).where(
@@ -460,11 +510,8 @@ async def delete_repo_by_id(
             Repository.user_uid == firebase_uid,
         )
     )
-
     await db.commit()
-
     return result.rowcount > 0
-
 # ---------------------------------------------------------
 # COLLABORATOR REPOSITORIES
 # ---------------------------------------------------------

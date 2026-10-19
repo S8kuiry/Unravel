@@ -52,3 +52,11 @@ export type GithubRepository = {
   pushed_at: string | null;
   owner?: { login?: string; type?: string };
 };
+
+export interface OpenedRepository {
+  id: string;
+  owner: string;
+  name: string;
+  /** ISO timestamp — backend guarantees non-null (backfilled from created_at). */
+  last_opened_at: string;
+}

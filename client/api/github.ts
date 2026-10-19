@@ -93,6 +93,21 @@ export async function getRepositoryFiles(
 }
 
 /**
+ * Fetch last-opened repositories for the sidebar / last-opened section.
+ * Backend: GET /github/opened-repositories
+ * Always returns non-null last_opened_at (backend backfills from created_at).
+ */
+export async function getOpenedRepositories(
+  token: string
+): Promise<GithubResponse<import("@/types/github").OpenedRepository[]>> {
+  return fetchGithubJson<GithubResponse<import("@/types/github").OpenedRepository[]>>(
+    "/github/opened-repositories",
+    token,
+    "Failed to fetch opened repositories."
+  );
+}
+
+/**
  * Fetch raw contents for up to 100 file paths on a branch.
  * Backend: POST /github/repositories/{owner}/{repo}/contents { paths, branch }
  */

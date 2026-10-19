@@ -8,11 +8,9 @@ import Sidebar from "@/components/Sidebar";
 import type { SidebarUser } from "@/components/Sidebar";
 import { useAuth } from "@/context/AuthContext"; // adjust to wherever your AuthProvider file lives
 import { sans } from "@/app/config/font";
-import Providers from "@/components/Providers";
+import { getOpenedRepositories } from "@/api/github";
 
-// Indexed repos shown under "Ready to ask". Empty until the repositories table exists.
-// To preview the section, add: { name: "unravel-web", href: "/dashboard/repo/you/unravel-web" }
-const READY_REPOS: { name: string; href: string }[] = [];
+export type ReadyRepo = { name: string; href: string; lastOpenedAt: string };
 
 function initialsOf(name: string) {
   const parts = name.trim().split(/\s+/).filter(Boolean);
@@ -23,9 +21,10 @@ function initialsOf(name: string) {
 
 export default function DashboardLayout({ children }: { children: ReactNode }) {
   const router = useRouter();
-  const { user, dbUser, loading, logout } = useAuth();
+  const { user, dbUser, loading, logout, getAuthToken } = useAuth();
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [readyRepos, setReadyRepos] = useState<ReadyRepo[]>([]);
 
   // Send signed-out visitors home
   useEffect(() => {
@@ -36,6 +35,39 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
   useEffect(() => {
     setCollapsed(localStorage.getItem("sidebar-collapsed") === "1");
   }, []);
+
+  // Last-opened section: fetch from backend (guaranteed non-null last_opened_at).
+  // Falls back to created_at ordering server-side for legacy rows.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      if (loading || !user) return;
+      try {
+        const token = await getAuthToken();
+        if (!token || cancelled) return;
+        const res = await getOpenedRepositories(token);
+        if (cancelled) return;
+        const mapped: ReadyRepo[] = (res.data ?? [])
+          .filter((r) => r.last_opened_at) // safety: skip any nulls
+          .sort(
+            (a, b) =>
+              new Date(b.last_opened_at).getTime() -
+              new Date(a.last_opened_at).getTime()
+          )
+          .map((r) => ({
+            name: r.name,
+            href: `/dashboard/repo/${encodeURIComponent(r.name)}?owner=${encodeURIComponent(r.owner)}`,
+            lastOpenedAt: r.last_opened_at,
+          }));
+        setReadyRepos(mapped);
+      } catch {
+        /* offline / unauthorized — sidebar simply hides the section */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [loading, user, getAuthToken]);
 
   const toggleCollapsed = () => {
     const next = !collapsed;
@@ -93,7 +125,7 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
         onCloseMobile={() => setMobileOpen(false)}
         user={profile}
         githubConnected={connected}
-        readyRepos={READY_REPOS}
+        readyRepos={readyRepos}
         onDisconnect={handleDisconnect}
         onSignOut={handleSignOut}
       />
@@ -105,10 +137,7 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
         {/* Pages render here and own their titles; the layout only supplies spacing */}
         <main className="flex-1 mt-6 mb-2 overflow-y-auto scrollbar-none [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
           <div className="mx-auto max-w-8xl px-8 pb-2 pt-2 md:px-8 min-h-screen">
-            <Providers>
-              {children}
-            </Providers>
-
+            {children}
           </div>
         </main>
       </div>

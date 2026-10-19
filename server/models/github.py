@@ -35,7 +35,7 @@ class Repository(Base):
     is_private = Column(Boolean, nullable=False, default=False)
     default_branch = Column(String, nullable=False, default="main")
 
-    last_opened_at = Column(DateTime(timezone=True), nullable=True)  # sidebar list
+    last_opened_at = Column(DateTime(timezone=True), nullable=True, default=_utcnow)  # sidebar list / last-opened section — always stamped on open
     created_at = Column(DateTime(timezone=True), default=_utcnow)
 
     # Relationships
