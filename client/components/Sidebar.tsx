@@ -8,10 +8,12 @@
 
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useSearchParams } from "next/navigation";
 import {
   Activity,
-  ChevronsUpDown, FolderGit2, LayoutDashboard, LogOut, PanelLeftClose, PanelLeftOpen, Settings, Unlink, X, Database
+  ChevronsUpDown, FolderGit2, LayoutDashboard, LogOut, PanelLeftClose, PanelLeftOpen, Settings, Unlink, X, Database,
+  Trash2,
+  Loader2
 } from "lucide-react";
 import { serif } from "@/app/config/font";
 import { toast } from "sonner";
@@ -19,6 +21,7 @@ import { GithubAuthProvider, unlink } from "firebase/auth/web-extension";
 import { useAuth } from "@/context/AuthContext";
 import { auth } from "@/app/config/firebase";
 import { disconnectGithub } from "@/api/user";
+import { ReadyRepo } from "@/app/dashboard/layout";
 
 export type SidebarUser = {
   name: string;
@@ -45,9 +48,10 @@ type Props = {
   onCloseMobile: () => void;
   user: SidebarUser;
   githubConnected: boolean;
-  readyRepos: { name: string; href: string; lastOpenedAt?: string }[];
-  onDisconnect: () => Promise<void> | void;
+  readyRepos: ReadyRepo[];
   onSignOut: () => Promise<void>;
+  isLoadingRepos?: boolean;
+  onDeleteRepo?: (repo: ReadyRepo) => void; // <-- Add this property
 };
 
 const iconBtn =
@@ -88,14 +92,15 @@ function Avatar({ src, initials, size }: { src: string | null; initials: string;
 
 export default function Sidebar({
   collapsed, mobileOpen, onToggle, onCloseMobile, user, githubConnected, readyRepos, onSignOut,
+  isLoadingRepos, onDeleteRepo
 }: Props) {
-  const {  getAuthToken, fetchDbUser } = useAuth();
+  const { getAuthToken, fetchDbUser } = useAuth();
   const pathname = usePathname();
   const [menuOpen, setMenuOpen] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
-   const [confirmingDisconnect, setConfirmingDisconnect] = useState<boolean>(false);
+  const [confirmingDisconnect, setConfirmingDisconnect] = useState<boolean>(false);
   const [isDisconnecting, setIsDisconnecting] = useState<boolean>(false);
 
   useEffect(() => {
@@ -156,13 +161,7 @@ export default function Sidebar({
   // Labels hide only on desktop when collapsed; the mobile drawer is always full width
   const hide = collapsed ? "md:hidden" : "";
 
-  // Active state checker logic
-  const isItemActive = (href: string) => {
-    if (href === "/dashboard") {
-      return pathname === "/dashboard";
-    }
-    return pathname.startsWith(href);
-  };
+
   return (
     <>
       {mobileOpen && (
@@ -211,7 +210,7 @@ export default function Sidebar({
           {/* Primary Navigation Items */}
           {NAV_ITEMS.map((item) => {
             const Icon = item.icon;
-            const active = isItemActive(item.href);
+            const active = pathname === item.href;
 
             return (
               <Link
@@ -220,7 +219,7 @@ export default function Sidebar({
                 title={item.name}
                 onClick={onCloseMobile}
                 aria-current={active ? "page" : undefined}
-                className={`group flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-all outline-none ${active
+                className={`group flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-all outline-none ${active
                   ? "bg-[#211E1B] text-[#ECE7DF] shadow-sm border border-[#2B2723]"
                   : "text-[#A39B90] hover:bg-[#1A1816] hover:text-[#ECE7DF]"
                   }`}
@@ -235,40 +234,87 @@ export default function Sidebar({
           })}
 
           {/* Indexed Repositories / Ask Section */}
-          {readyRepos.length > 0 && (
-            <div className="pt-5">
-              {collapsed && <div className="mx-2 mb-2 hidden border-t border-[#2B2723] md:block" />}
-              <p className={`px-3 pb-2 text-[11px] font-semibold uppercase tracking-wider text-[#6F675D] ${hide}`}>
-                Ready to ask
-              </p>
-              {readyRepos.map((r) => {
-                const active = pathname.startsWith(r.href);
-                return (
-                  <Link
-                    key={r.href}
-                    href={r.href}
-                    title={r.name}
-                    onClick={onCloseMobile}
-                    aria-current={active ? "page" : undefined}
-                    className={`group flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-all ${active
-                      ? "bg-[#211E1B] text-[#ECE7DF] border border-[#2B2723]"
-                      : "text-[#A39B90] hover:bg-[#1A1816] hover:text-[#ECE7DF]"
-                      }`}
-                  >
-                    <span
-                      className={`grid h-4 w-4 shrink-0 place-items-center rounded-sm text-[10px] font-semibold transition-colors ${active
-                        ? "bg-[#F5A524] text-[#1A1206]"
-                        : "bg-[#2B2723] text-[#A39B90] group-hover:bg-[#38332E] group-hover:text-[#ECE7DF]"
+          <div className="pt-5 flex flex-col min-h-0"> {/* Added flex flex-col min-h-0 */}
+            {collapsed && <div className="mx-2 mb-2 hidden border-t border-[#2B2723] md:block" />}
+
+            {/* Section Header with Smart Loader */}
+            <div className="flex items-center justify-between px-3 pb-2 mt-4 shrink-0">
+              <span className={`text-[11px] font-semibold uppercase tracking-wider text-[#6F675D] ${hide}`}>
+                Opened Repositories
+              </span>
+              {isLoadingRepos && (
+                <Loader2 className={`h-3 w-3 animate-spin text-[#F5A524] ${hide}`} />
+              )}
+            </div>
+
+            {/* Scrollable Repositories List Container */}
+            <div className="flex-1 overflow-y-auto space-y-1 pr-1 scrollbar-thin scrollbar-thumb-[#2B2723] hover:scrollbar-thumb-[#38332E]">
+              {/* Loading State or Repository List */}
+              {!isLoadingRepos && readyRepos.length === 0 && (
+                <div className="mx-3 my-2 flex flex-col items-center justify-center rounded-lg border border-dashed border-[#2B2723] px-4 py-6 text-center">
+                  <FolderGit2 className="h-6 w-6 text-[#6F675D]" />
+                  <p className="mt-2 text-xs font-medium text-[#ECE7DF]">No repositories opened</p>
+                  <p className="mt-1 text-[11px] text-[#6F675D] leading-relaxed">
+                    Select a repository from your main list to pin it here for quick access.
+                  </p>
+                </div>
+              )}
+
+              {readyRepos.length === 0 && isLoadingRepos ? (
+                <div className={`px-3 py-2.5 flex items-center gap-2.5 text-xs text-[#6F675D] ${hide}`}>
+                  {/* <Loader2 className="h-3.5 w-3.5 animate-spin text-[#F5A524]" /> */}
+                  <span>Syncing repositories...</span>
+                </div>
+              ) : (
+                readyRepos.map((r) => {
+                  const active = pathname === `/dashboard/repo/${r.name}`; 
+                  return (
+                    <div
+                      key={r.href}
+                      className={`group relative flex items-center justify-between rounded-md px-2 py-1.5 text-sm font-medium transition-all ${active
+                        ? "bg-[#211E1B] text-[#ECE7DF] border border-[#2B2723]"
+                        : "text-[#A39B90] hover:bg-[#1A1816] hover:text-[#ECE7DF]"
                         }`}
                     >
-                      {r.name.charAt(0).toUpperCase()}
-                    </span>
-                    <span className={`truncate ${hide}`}>{r.name}</span>
-                  </Link>
-                );
-              })}
+                      <Link
+                        href={r.href}
+                        title={r.name}
+                        onClick={onCloseMobile}
+                        aria-current={active ? "page" : undefined}
+                        className="flex flex-1 items-center gap-3 overflow-hidden outline-none py-0.5 px-1"
+                      >
+                        <span
+                          className={`grid h-4 w-4 shrink-0 place-items-center rounded-sm text-[10px] font-semibold transition-colors ${active
+                            ? "bg-[#F5A524] text-[#1A1206]"
+                            : "bg-[#2B2723] text-[#A39B90] group-hover:bg-[#38332E] group-hover:text-[#ECE7DF]"
+                            }`}
+                        >
+                          {r.name.charAt(0).toUpperCase()}
+                        </span>
+                        <span className={`truncate ${hide}`}>{r.name}</span>
+                      </Link>
+
+                      {/* ChatGPT-style Delete Icon on Hover */}
+                      {!collapsed && (
+                        <button
+                          onClick={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            onDeleteRepo?.(r);
+                          }}
+                          title="Remove repository from view"
+                          className="opacity-0 group-hover:opacity-100 p-1 text-[#6F675D] hover:text-[#E5776A] transition-opacity rounded-md hover:bg-[#2B2723]"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      )}
+                    </div>
+                  );
+                })
+              )}
             </div>
-          )}
+          </div>
+
         </nav>
 
         {/* Account */}
@@ -311,7 +357,7 @@ export default function Sidebar({
                         onClick={handleDisconnect}
                         className="flex-1 rounded-md bg-[#E5776A]/15 px-3 py-1.5 text-xs font-medium text-[#E5776A] hover:bg-[#E5776A]/25"
                       >
-              {isDisconnecting ? "Disconnecting..." : "Confirm"}
+                        {isDisconnecting ? "Disconnecting..." : "Confirm"}
                       </button>
                     </div>
                   </div>

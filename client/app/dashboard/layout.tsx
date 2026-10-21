@@ -3,15 +3,23 @@
 import { useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import { useRouter } from "next/navigation";
-import { Menu } from "lucide-react";
 import Sidebar from "@/components/Sidebar";
 import type { SidebarUser } from "@/components/Sidebar";
 import { useAuth } from "@/context/AuthContext"; // adjust to wherever your AuthProvider file lives
 import { sans } from "@/app/config/font";
-import { getOpenedRepositories } from "@/api/github";
+import { deleteRepositoriesById, getOpenedRepositories } from "@/api/github";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
+import { DeleteModal } from "@/components/DeleteModal";
+import { OpenedRepoRow } from "@/types/github";
 
-export type ReadyRepo = { name: string; href: string; lastOpenedAt: string };
-
+export type ReadyRepo = {
+  id: string;
+  owner: string;
+  name: string;
+  href: string;
+  lastOpenedAt: string;
+};
 function initialsOf(name: string) {
   const parts = name.trim().split(/\s+/).filter(Boolean);
   const first = parts[0]?.[0] ?? "";
@@ -19,12 +27,81 @@ function initialsOf(name: string) {
   return (first + last).toUpperCase() || "U";
 }
 
+
+function toReadyRepos(rows: OpenedRepoRow[]): ReadyRepo[] {
+  return rows
+    .map((r) => ({
+      id: r.id,
+      owner: r.owner,
+      name: r.name,
+      href: `/dashboard/repo/${encodeURIComponent(r.name)}?owner=${encodeURIComponent(r.owner)}`,
+      lastOpenedAt: r.last_opened_at,
+    }))
+    .sort((a, b) => {
+      const timeA = a.lastOpenedAt ? new Date(a.lastOpenedAt).getTime() : 0;
+      const timeB = b.lastOpenedAt ? new Date(b.lastOpenedAt).getTime() : 0;
+      return timeB - timeA; // Newest / most recent first
+    });
+}
+
 export default function DashboardLayout({ children }: { children: ReactNode }) {
   const router = useRouter();
   const { user, dbUser, loading, logout, getAuthToken } = useAuth();
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
-  const [readyRepos, setReadyRepos] = useState<ReadyRepo[]>([]);
+  const [repoToDelete, setRepoToDelete] = useState<ReadyRepo | null>(null);
+  const queryClient = useQueryClient();
+
+
+  //-------------------  fetch the opened repos ---------------------------
+  const reposQuery = useQuery({
+    queryKey: ["opened-repos", user?.uid],
+    enabled: !loading && !!user,
+    queryFn: async () => {
+      const token = await getAuthToken();
+      if (!token) throw new Error("You are not authenticated.");
+      const res = await getOpenedRepositories(token);
+      return (res.data ?? []) as OpenedRepoRow[];
+    },
+    select: toReadyRepos,
+  });
+
+  const readyRepos = reposQuery.data ?? [];
+
+  // --------------- delete opned repos --------------------------
+  const deleteRepoMutation = useMutation({
+    mutationFn: async (repoId: string) => {
+      const token = await getAuthToken();
+      if (!token) throw new Error("Not authenticated");
+      const res = await deleteRepositoriesById(
+        token,
+        repoToDelete?.id ?? ""
+
+      );
+      return res.message;
+    },
+    onSuccess: (message) => {
+      toast.success(`${message}`);
+
+      // Check if the repository being deleted is the EXACT one currently open in the URL
+      const currentPath = window.location.pathname;
+      const isViewingThisRepo = currentPath.includes(`/repo/${encodeURIComponent(repoToDelete?.name??"")}`);
+      if (isViewingThisRepo) {
+        // Only redirect if deleting the active repo
+        router.replace("/dashboard");
+      }
+      // 2. Clean up cache and state safely after initiating navigation
+      queryClient.invalidateQueries({ queryKey: ["opened-repos", user?.uid] });
+      queryClient.removeQueries({ queryKey: ["repo-files", repoToDelete?.owner, repoToDelete?.name] });
+      queryClient.removeQueries({ queryKey: ["repo-content", repoToDelete?.owner, repoToDelete?.name] });
+
+      setRepoToDelete(null);
+    },
+    onError: () => {
+      toast.error("Failed to remove repository.");
+    },
+  });
+
 
   // Send signed-out visitors home
   useEffect(() => {
@@ -36,38 +113,7 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
     setCollapsed(localStorage.getItem("sidebar-collapsed") === "1");
   }, []);
 
-  // Last-opened section: fetch from backend (guaranteed non-null last_opened_at).
-  // Falls back to created_at ordering server-side for legacy rows.
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      if (loading || !user) return;
-      try {
-        const token = await getAuthToken();
-        if (!token || cancelled) return;
-        const res = await getOpenedRepositories(token);
-        if (cancelled) return;
-        const mapped: ReadyRepo[] = (res.data ?? [])
-          .filter((r) => r.last_opened_at) // safety: skip any nulls
-          .sort(
-            (a, b) =>
-              new Date(b.last_opened_at).getTime() -
-              new Date(a.last_opened_at).getTime()
-          )
-          .map((r) => ({
-            name: r.name,
-            href: `/dashboard/repo/${encodeURIComponent(r.name)}?owner=${encodeURIComponent(r.owner)}`,
-            lastOpenedAt: r.last_opened_at,
-          }));
-        setReadyRepos(mapped);
-      } catch {
-        /* offline / unauthorized — sidebar simply hides the section */
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [loading, user, getAuthToken]);
+
 
   const toggleCollapsed = () => {
     const next = !collapsed;
@@ -107,9 +153,6 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
     }
   };
 
-  const handleDisconnect = async () => {
-    // TODO: POST /auth/github/disconnect with the Firebase ID token, then fetchDbUser()
-  };
 
   // Avoid flashing the dashboard before we know who is signed in
   if (loading || !user) {
@@ -126,8 +169,19 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
         user={profile}
         githubConnected={connected}
         readyRepos={readyRepos}
-        onDisconnect={handleDisconnect}
         onSignOut={handleSignOut}
+        isLoadingRepos={reposQuery.isFetching}
+        onDeleteRepo={(repo) => setRepoToDelete(repo)}
+      />
+
+      {/* Delete Confirmation Modal */}
+      <DeleteModal
+        isOpen={!!repoToDelete}
+        onClose={() => setRepoToDelete(null)}
+        onConfirm={() => repoToDelete && deleteRepoMutation.mutate(repoToDelete.id)}
+        title={`Remove ${repoToDelete?.name}?`}
+        description="This will remove the repository from your quick-access sidebar list."
+        loading={deleteRepoMutation.isPending}
       />
 
       {/* The page sits on an inset canvas, like Linear or Gemini */}
@@ -141,6 +195,9 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
           </div>
         </main>
       </div>
+
+
+
     </div>
   );
 }

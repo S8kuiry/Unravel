@@ -21,12 +21,14 @@ import { GithubAuthProvider, unlink } from "firebase/auth";
 import { auth } from "@/app/config/firebase";
 import { isGithubTokenExpired } from "@/lib/github-session";
 import { useExpandedFolders } from "@/lib/useExpandedFolders";
+import { OpenedRepoRow } from "@/types/github";
 
 export default function RepoWorkspacePage({
     params,
 }: {
     params: Promise<{ name: string }>;
 }) {
+    const { user } = useAuth()
     const resolvedParams = use(params);
     const repoName = resolvedParams.name;
     const searchParams = useSearchParams();
@@ -34,12 +36,10 @@ export default function RepoWorkspacePage({
     const router = useRouter();
     const { getAuthToken, fetchDbUser } = useAuth();
     const [currentBranch, setCurrentBranch] = useState("main");
-    // const [activeFile, setActiveFile] = useState<string | null>(null);  
     const activeFile = searchParams.get("file");
     const [chatInput, setChatInput] = useState("");
     const [copied, setCopied] = useState(false);
     const queryClient = useQueryClient();
-    const filesKey = ["repo-files", owner, repoName, currentBranch] as const;
     const { expanded, toggle: toggleFolder } = useExpandedFolders(
         `unravel:expanded:${owner}/${repoName}:${currentBranch}`,
         activeFile
@@ -47,6 +47,9 @@ export default function RepoWorkspacePage({
 
 
     /* ---------- File Select Function ---------- */
+
+    const filesKey = ["repo-files", owner, repoName, currentBranch] as const;
+
     const handleSelectFile = useCallback((path: string) => {
         const params = new URLSearchParams(window.location.search);
         params.set("file", path);
@@ -57,7 +60,9 @@ export default function RepoWorkspacePage({
     /* ---------- File list ---------- */
     const filesQuery = useQuery({
         queryKey: filesKey,
-        enabled: !!owner,
+        enabled: Boolean(owner && repoName && currentBranch),
+        staleTime: 10 * 60 * 1000,
+        gcTime: 15 * 60 * 1000, // <--- Add individual gcTime here (e.g. 1 hour)
         retry: false,
         queryFn: async () => {
             if (!owner) {
@@ -78,6 +83,124 @@ export default function RepoWorkspacePage({
     const filesLoading = filesQuery.isPending;
     const filesError = filesQuery.error?.message ?? null;
     const filesExpired = isGithubTokenExpired(filesError);
+
+
+    /* ---------- File content ---------- */
+    const contentQuery = useQuery({
+        queryKey: ["repo-content", owner, repoName, branch, activeFile],
+        enabled: !!activeFile && filesQuery.isSuccess,
+        staleTime: 30 * 60 * 1000,
+        gcTime: 35 * 60 * 1000, // <--- Add individual gcTime here (e.g. 1 hour)
+        retry: false,
+        queryFn: async () => {
+            const token = await getAuthToken();
+            if (!token) {
+                throw new Error("You are not authenticated.");
+            }
+            const res = await getRepositoryFileContents(
+                token,
+                owner,
+                repoName,
+                [activeFile as string],
+                branch
+            );
+            return res.data[0]?.content ?? "";
+        },
+    });
+
+    const fileContent = contentQuery.data ?? "";
+    const contentLoading = contentQuery.isPending;
+    const contentError = contentQuery.error?.message ?? null;
+
+
+    /* ---------- Force Refresh ---------- */
+
+    const refreshMutation = useMutation({
+        mutationFn: async () => {
+            const token = await getAuthToken();
+
+            if (!token) {
+                throw new Error("You are not authenticated.");
+            }
+
+            const res = await getRepositoryFiles(
+                token,
+                owner,
+                repoName,
+                currentBranch,
+                true
+            );
+
+            return res.data;
+        },
+
+        onSuccess: async (files) => {
+            // Store the freshly fetched file list.
+            queryClient.setQueryData(filesKey, files);
+
+            // Refetch active file-content queries only after the
+            // refreshed file list has arrived.
+            await queryClient.invalidateQueries({
+                queryKey: [
+                    "repo-content",
+                    owner,
+                    repoName,
+                    files.branch,
+                ],
+                refetchType: "active",
+            });
+        },
+        onError: (err) => {
+            toast.error(err instanceof Error ? err.message : "Refresh failed.");
+        },
+    });
+
+    /* ------------- sidebar data fetcing  trigger --------------- */
+    useEffect(() => {
+        if (filesQuery.isSuccess && owner && repoName) {
+            // 1. Optimistically update the opened-repos cache so this repo moves to the top instantly
+            queryClient.setQueryData(["opened-repos", user?.uid], (oldData: OpenedRepoRow[] | undefined) => {
+                if (!oldData) return oldData;
+
+                const now = new Date().toISOString();
+                const existingIndex = oldData.findIndex(r => r.name === repoName && r.owner === owner);
+
+                if (existingIndex > -1) {
+                    // Update existing repo's timestamp to now
+                    const updated = [...oldData];
+                    updated[existingIndex] = { ...updated[existingIndex], last_opened_at: now };
+                    return updated;
+                }
+                return oldData;
+            });
+
+            // 2. Trigger background refetch to sync with backend DB
+            queryClient.invalidateQueries({ queryKey: ["opened-repos"] });
+        }
+    }, [filesQuery.isSuccess, owner, repoName, queryClient, user?.uid]);
+
+
+
+    const fileLabel = useMemo(
+        () => activeFile ?? "Select a file",
+        [activeFile]
+    );
+
+    const handleCopyCode = async () => {
+        try {
+            await navigator.clipboard.writeText(fileContent);
+            setCopied(true);
+            setTimeout(() => setCopied(false), 2000);
+        } catch (err) {
+            console.error("Failed to copy code:", err);
+        }
+    };
+
+    const fileTree = useMemo(() =>
+        buildFileTree(files),
+        [files])
+
+
 
     // Token expired mid-session: auto-disconnect (same flow as sidebar/dashboard)
     // and send user to the connect view. Expiry notice is toast-only.
@@ -109,96 +232,6 @@ export default function RepoWorkspacePage({
             cancelled = true;
         };
     }, [filesExpired, fetchDbUser, getAuthToken, router]);
-
-
-    /* ---------- File content ---------- */
-    const contentQuery = useQuery({
-        queryKey: ["repo-content", owner, repoName, branch, activeFile],
-        enabled: !!activeFile && filesQuery.isSuccess,
-        staleTime: 30 * 60 * 1000,
-        retry: false,
-        queryFn: async () => {
-            const token = await getAuthToken();
-            if (!token) {
-                throw new Error("You are not authenticated.");
-            }
-            const res = await getRepositoryFileContents(
-                token,
-                owner,
-                repoName,
-                [activeFile as string],
-                branch
-            );
-            return res.data[0]?.content ?? "";
-        },
-    });
-
-    const fileContent = contentQuery.data ?? "";
-    const contentLoading = contentQuery.isPending;
-    const contentError = contentQuery.error?.message ?? null;
-
-
-
-
-    /* ---------- Force Refresh ---------- */
-    const refreshMutation = useMutation({
-        mutationFn: async (file: string | null) => {
-            const token = await getAuthToken();
-            if (!token) throw new Error("You are not authenticated.");
-
-            // Same two API functions the queries use, run together
-            const [filesRes, contentRes] = await Promise.all([
-                getRepositoryFiles(token, owner, repoName, currentBranch,true),
-                file
-                    ? getRepositoryFileContents(token, owner, repoName, [file], currentBranch)
-                    : Promise.resolve(null),
-            ]);
-
-            return {
-                files: filesRes.data,
-                file,
-                content: contentRes?.data[0]?.content ?? "",
-            };
-        },
-        onSuccess: ({ files, file, content }) => {
-            // 1. Mark every cached file in this repo stale, but fetch nothing yet
-            queryClient.invalidateQueries({
-                queryKey: ["repo-content", owner, repoName, currentBranch],
-                refetchType: "none",
-            });
-            // 2. Write the fresh data (this also clears the stale mark on these entries)
-            queryClient.setQueryData(filesKey, files);
-            if (file) {
-                queryClient.setQueryData(
-                    ["repo-content", owner, repoName, files.branch, file],
-                    content
-                );
-            }
-        },
-
-    });
-
-
-
-
-    const fileLabel = useMemo(
-        () => activeFile ?? "Select a file",
-        [activeFile]
-    );
-
-    const handleCopyCode = async () => {
-        try {
-            await navigator.clipboard.writeText(fileContent);
-            setCopied(true);
-            setTimeout(() => setCopied(false), 2000);
-        } catch (err) {
-            console.error("Failed to copy code:", err);
-        }
-    };
-
-    const fileTree = useMemo(() =>
-        buildFileTree(files),
-        [files])
 
     return (
         <div className={`flex h-[calc(100dvh-3.0rem)] min-h-[560px] w-full flex-col ${sans.className}`}>
@@ -233,7 +266,7 @@ export default function RepoWorkspacePage({
                                 <div className="flex items-center gap-3">
                                     <span className="text-xs text-[#A39B90]">Read-only mode</span>
                                     <button
-                                        onClick={() => refreshMutation.mutate(activeFile)}
+                                        onClick={() => refreshMutation.mutate()}
                                         disabled={refreshMutation.isPending}
                                         className="cursor-pointer flex items-center gap-1.5 rounded-lg border border-[#2B2723] bg-[#0E0D0C] px-2.5 py-2 text-xs font-medium text-[#ECE7DF] transition-colors hover:border-[#F5A524] hover:text-[#F5A524] focus:outline-none disabled:cursor-not-allowed disabled:opacity-60"
                                         title="Refresh files"

@@ -12,6 +12,7 @@ from crud.github import (
     delete_repo_by_id
 )
 from models.github import FileContentsRequest
+import uuid
 
 
 router = APIRouter(
@@ -61,6 +62,7 @@ async def github_profile(
 
 @router.get("/repositories")
 async def github_repositories(
+    page:int, 
     uid: str = Depends(get_current_uid),
     db: AsyncSession = Depends(get_db),
 ):
@@ -68,6 +70,7 @@ async def github_repositories(
         repositories = await get_github_repositories(
             db=db,
             firebase_uid=uid,
+            page=page
         )
 
         if repositories is None:
@@ -79,7 +82,9 @@ async def github_repositories(
         return {
             "status": "success",
             "message": "GitHub repositories fetched successfully",
-            "data": repositories,
+            "data": repositories["repos"],
+            "page": repositories["page"],         
+            "hasNextPage": repositories["hasNextPage"]
         }
 
     except ValueError as e:
@@ -225,7 +230,7 @@ async def opened_repositories(
 
 @router.delete("/repositories/{repo_id}")
 async def delete_repository_endpoint(
-    repo_id: str,
+    repo_id: uuid.UUID,
     uid: str = Depends(get_current_uid),
     db: AsyncSession = Depends(get_db),
 ):
@@ -239,7 +244,7 @@ async def delete_repository_endpoint(
 
     return {
         "status": "success",
-        "message": "Repository deleted successfully",
+        "message": "Repository removed successfully",
     }
 
     

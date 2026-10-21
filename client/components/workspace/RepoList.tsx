@@ -1,18 +1,58 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { RefreshCw, Search } from "lucide-react";
+import { ChevronLeft, ChevronRight, RefreshCw, Search } from "lucide-react";
 import { Repo, RepoRow } from "./RepoRow";
 import { Card } from "../Panel";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 
 type Props = {
   repos: Repo[];
   refreshing: boolean;
+  currentPage: number;
+  hasNextPage: boolean;
   // onRefresh: () => void;
 };
 
-export default function RepoList({ repos, refreshing }: Props) {
+export default function RepoList({ repos, refreshing,currentPage,hasNextPage}: Props) {
   const [q, setQ] = useState("");
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+
+  const handlePageChange = (newPage: number) => {
+    const params = new URLSearchParams(searchParams.toString());
+    if (newPage <= 1) {
+      params.delete("page");
+    } else {
+      params.set("page", String(newPage));
+    }
+    router.push(`${pathname}?${params.toString()}`);
+  };
+
+  const paginationHeader = (
+    <div className="flex items-center gap-3">
+      <span className="text-xs text-[#A39B90]">Page {currentPage}</span>
+      <div className="flex items-center gap-1">
+        <button
+          onClick={() => handlePageChange(currentPage - 1)}
+          disabled={currentPage <= 1 || refreshing}
+          aria-label="Previous page"
+          className="grid h-7 w-7 place-items-center rounded-md border border-[#2B2723] bg-[#181614] text-[#ECE7DF] transition-colors hover:bg-[#211E1B] disabled:opacity-40 disabled:cursor-not-allowed"
+        >
+          <ChevronLeft className="h-4 w-4" />
+        </button>
+        <button
+          onClick={() => handlePageChange(currentPage + 1)}
+          disabled={!hasNextPage || refreshing}
+          aria-label="Next page"
+          className="grid h-7 w-7 place-items-center rounded-md border border-[#2B2723] bg-[#181614] text-[#ECE7DF] transition-colors hover:bg-[#211E1B] disabled:opacity-40 disabled:cursor-not-allowed"
+        >
+          <ChevronRight className="h-4 w-4" />
+        </button>
+      </div>
+    </div>
+  );
 
   const shown = useMemo(() => {
     const s = q.trim().toLowerCase();
@@ -26,6 +66,7 @@ export default function RepoList({ repos, refreshing }: Props) {
     <Card
       title="Your repositories"
       meta={String(repos.length)}
+      action={paginationHeader}
       
     >
       <div className="sticky top-0 z-10 border-b border-[#2B2723] bg-[#181614] p-3">

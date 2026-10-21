@@ -1,12 +1,14 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useSearchParams, useRouter, usePathname } from "next/navigation";
 import { Group, Panel } from "react-resizable-panels";
 import { useAuth } from "@/context/AuthContext";
 import { serif } from "@/app/config/font";
 import { GithubMark, Handle } from "@/components/Panel";
 import { Repo, } from "@/components/workspace/RepoRow";
 import RepoList from "@/components/workspace/RepoList";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   GithubAuthProvider,
   getAdditionalUserInfo,
@@ -23,6 +25,7 @@ import { getGithubProfile, getGithubRepositories } from "@/api/github";
 import SharedPanel from "@/components/workspace/Sharedpanel";
 import { RefreshCw } from "lucide-react";
 import { isGithubTokenExpired } from "@/lib/github-session";
+
 
 type Layout = Record<string, number>;
 
@@ -64,6 +67,8 @@ function mapGithubRepoToUI(
     description: string | null;
     language: string | null;
     pushed_at: string | null;
+    html_url: string | null;
+    default_branch: string | null;
   },
   currentUserLogin: string
 ): Repo {
@@ -88,7 +93,9 @@ function mapGithubRepoToUI(
     pushedAt: rawRepo.pushed_at ?? new Date().toISOString(),
     access,
     indexed: "none",
-  };
+    html_url: rawRepo.html_url,
+    default_branch: rawRepo.default_branch,
+  }
 }
 
 export default function WorkspacePage() {
@@ -96,12 +103,78 @@ export default function WorkspacePage() {
   const wide = useIsWide();
 
   // 1. ALL HOOKS DEFINED FIRST AT TOP LEVEL
-  const [repos, setRepos] = useState<Repo[]>([]);
-  const [isLoading, setIsLoading] = useState<boolean>(true);
-  const [refreshing, setRefreshing] = useState<boolean>(false);
+  // const [repos, setRepos] = useState<Repo[]>([]);
+  // const [isLoading, setIsLoading] = useState<boolean>(true);
+  // const [refreshing, setRefreshing] = useState<boolean>(false);
+  // const [isLoginGit, setLoginGit] = useState<boolean>(false);
+  // const [refreshedAt, setRefreshedAt] = useState(() => new Date().toISOString());
   const [isLoginGit, setLoginGit] = useState<boolean>(false);
-  const [refreshedAt, setRefreshedAt] = useState(() => new Date().toISOString());
-  const githubFetchInFlight = useRef<Promise<void> | null>(null);
+
+  const searchParams = useSearchParams();
+  const router = useRouter();
+  const pathname = usePathname();
+  const queryClient = useQueryClient();
+  // 1. Read current page from URL search params (defaults to 1)
+  const currentPage = Number(searchParams.get("page")) || 1;
+
+
+  // 2. TanStack Query handles caching, deduping, and background updates automatically
+  const {
+    data: githubData, isLoading, isFetching, refetch,
+
+  } = useQuery({
+    queryKey: ["github-repos", dbUser?.firebase_uid, currentPage],
+    enabled: !!dbUser?.git_authorized,
+    staleTime: 1000 * 60 * 100,
+    gcTime: 110 * 60 * 1000, // <--- Add individual gcTime here (e.g. 1 hour)
+    retry: (failureCount, error: any) => {
+      if (error?.message && isGithubTokenExpired(error.message)) {
+        handleExpiredSession();
+        return false;
+      }
+      return failureCount < 2;
+    },
+    queryFn: async () => {
+      const token = await getAuthToken();
+      if (!token) throw new Error("Authentication token not found.");
+
+      // Fetch repositories for current page (Profile fetch removed!)
+      const reposRes = await getGithubRepositories(token, currentPage);
+
+      if (reposRes?.status !== "success" || !Array.isArray(reposRes.data)) {
+        throw new Error(reposRes?.message || "Failed to load repositories");
+      }
+
+      // Use the cached github_login from dbUser instantly
+      const currentLogin = dbUser?.github_login || "";
+      const mappedRepos = reposRes.data.map((r) =>
+        mapGithubRepoToUI(r, currentLogin)
+      );
+
+      return {
+        repos: mappedRepos,
+        page: reposRes.page,
+        hasNextPage: reposRes.hasNextPage,
+        refreshedAt: new Date().toISOString(),
+      };
+    },
+
+  })
+
+  const repos = githubData?.repos || [];
+  const refreshedAt = githubData?.refreshedAt || new Date().toISOString();
+  const hasNextPage = githubData?.hasNextPage
+
+  // Handlers & Derived Values
+  const handleRefresh = async () => {
+    // Invalidates all cached pages (Page 1, Page 2, etc.) and forces a fresh pull
+    await queryClient.invalidateQueries({ queryKey: ["github-repos"] });
+  };
+
+  const orgs = Array.from(new Set(repos.filter((r) => r.access === "org").map((r) => r.owner)));
+  const own = repos.filter((r) => r.access === "owner");
+  const sharedRepos = repos.filter((r) => r.access !== "owner");
+
 
   // Auto-disconnect when the stored GitHub token has expired.
   // Best-effort: unlink Firebase provider (ignore if already unlinked),
@@ -127,66 +200,8 @@ export default function WorkspacePage() {
     }
   }, [fetchDbUser, getAuthToken]);
 
-  const fetchGithubData = useCallback(() => {
-    if (!dbUser?.git_authorized) return Promise.resolve();
-    if (githubFetchInFlight.current) return githubFetchInFlight.current;
 
-    const request = (async () => {
-      try {
-        setIsLoading(true);
-        const token = await getAuthToken();
-        if (!token) return;
 
-        const [profileRes, reposRes] = await Promise.all([
-          getGithubProfile(token),
-          getGithubRepositories(token),
-        ]);
-
-        let currentLogin = dbUser.github_login || "";
-
-        if (profileRes?.status === "success" && profileRes.data) {
-          if (profileRes.data.login) {
-            currentLogin = profileRes.data.login;
-          }
-        }
-
-        if (reposRes?.status === "success" && Array.isArray(reposRes.data)) {
-          const mappedRepos = reposRes.data.map((r) =>
-            mapGithubRepoToUI(r, currentLogin)
-          );
-          setRepos(mappedRepos);
-          setRefreshedAt(new Date().toISOString());
-        }
-      } catch (error: unknown) {
-        console.error("Error fetching GitHub data:", error);
-        const message = error instanceof Error ? error.message : "Failed to load GitHub data";
-        if (isGithubTokenExpired(message)) {
-          await handleExpiredSession();
-        } else {
-          toast.error(message);
-        }
-      } finally {
-        setIsLoading(false);
-      }
-    })();
-
-    githubFetchInFlight.current = request;
-
-    
-    // 5. Automatically clear the tracker when finished (success OR failure)
-    request.finally(() => {
-      if (githubFetchInFlight.current === request) {
-        githubFetchInFlight.current = null;
-      }
-    });
-    return request;
-  }, [dbUser, getAuthToken, handleExpiredSession]);
-
-  useEffect(() => {
-    if (dbUser?.git_authorized) {
-      fetchGithubData();
-    }
-  }, [dbUser?.git_authorized, fetchGithubData]);
 
   // 2. EARLY RETURNS PLACED AFTER ALL HOOKS
   if (!dbUser || wide === null) return null;
@@ -265,7 +280,8 @@ export default function WorkspacePage() {
     }
   };
 
-  // Not connected view.
+
+  // -------Not connected view.---------------
   if (!dbUser.git_authorized) {
     return (
       <div className="mx-auto mt-20 max-w-md text-center">
@@ -288,33 +304,17 @@ export default function WorkspacePage() {
     );
   }
 
-  // Handlers & Derived Values
-  const handleRefresh = async () => {
-    setRefreshing(true);
-    await fetchGithubData();
-    setRefreshing(false);
-  };
-
-
-  const orgs = Array.from(new Set(repos.filter((r) => r.access === "org").map((r) => r.owner)));
-
-
-
-
-
-  const own = repos.filter((r) => r.access === "owner");
-  const sharedRepos = repos.filter((r) => r.access !== "owner");
 
   const ownPanel = (
     <RepoList
       repos={own}
-      refreshing={refreshing || isLoading}
-    // onRefresh={handleRefresh}
+      refreshing={isLoading || isFetching}
+      currentPage={currentPage}
+      hasNextPage={hasNextPage??false}
     />
   );
 
-
-  const sharedPanel = <SharedPanel repos={sharedRepos} loading={isLoading} />;
+  const sharedPanel = <SharedPanel repos={sharedRepos} loading={isLoading || isFetching} />;
   return (
     <div className="flex h-[calc(100dvh-3.0rem)] min-h-[560px] w-full flex-col">
       {/* Updated Header with Refresh Button */}
@@ -329,10 +329,10 @@ export default function WorkspacePage() {
         </div>
         <button
           onClick={handleRefresh}
-          disabled={refreshing || isLoading}
+          disabled={isFetching || isLoading}
           className="flex items-center gap-2 rounded-lg border border-[#2B2723] bg-[#181614] px-3.5 py-2 text-xs font-medium text-[#ECE7DF] outline-none transition-colors hover:bg-[#211E1B] focus-visible:ring-2 focus-visible:ring-[#F5A524] disabled:opacity-60"
         >
-          <RefreshCw className={`h-3.5 w-3.5 ${refreshing || isLoading ? "animate-spin" : ""}`} />
+          <RefreshCw className={`h-3.5 w-3.5 ${isFetching || isLoading ? "animate-spin" : ""}`} />
           Refresh from GitHub
         </button>
       </div>

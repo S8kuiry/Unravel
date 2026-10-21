@@ -1,9 +1,15 @@
-import { GithubProfile, GithubRepository, GithubResponse } from "@/types/github";
+import { GithubProfile, GitHubRepositoriesResponse, GithubRepository, GithubResponse } from "@/types/github";
 
 const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
 
 const inFlightGithubRequests = new Map<string, Promise<unknown>>();
+
+
+async function handleApiError(res: Response, fallback: string): Promise<never> {
+  const errorData = await res.json().catch(() => ({}));
+  throw new Error(errorData.detail || fallback);
+}
 
 
 async function fetchGithubJson<T>(endpoint: string, token: string, fallback: string): Promise<T> {
@@ -38,30 +44,46 @@ async function fetchGithubJson<T>(endpoint: string, token: string, fallback: str
 /**
  * Fetch the authenticated GitHub user's profile.
  */
-export async function getGithubProfile(token: string) {
-  return fetchGithubJson<GithubResponse<GithubProfile>>(
-    "/github/profile",
-    token,
-    "Failed to fetch GitHub profile."
-  );
+export async function getGithubProfile(token: string):Promise<GithubProfile> {
+   const res = await fetch(`${API_BASE_URL}/github/profile`, {
+    method: "GET",
+    headers: {
+      "Authorization": `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+  });
+
+  if (!res.ok) {
+    await handleApiError(res, "Failed to fetch Github Profile.");
+
+  }
+
+  return res.json();
 }
 
 /**
  * Fetch repositories accessible to the authenticated GitHub user.
  */
-export async function getGithubRepositories(token: string) {
-  return fetchGithubJson<GithubResponse<GithubRepository[]>>(
-    "/github/repositories",
-    token,
-    "Failed to fetch GitHub repositories."
-  );
-}
 
-async function handleApiError(res: Response, fallback: string): Promise<never> {
-  const errorData = await res.json().catch(() => ({}));
-  throw new Error(errorData.detail || fallback);
-}
+export async function getGithubRepositories(
+  token: string,
+  page: number = 1
+): Promise<GitHubRepositoriesResponse> {
+  const res = await fetch(`${API_BASE_URL}/github/repositories?page=${page}`, {
+    method: "GET",
+    headers: {
+      "Authorization": `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+  });
 
+  if (!res.ok) {
+    await handleApiError(res, "Failed to fetch Github Repositories.");
+
+  }
+
+  return res.json();
+}
 
 
 /**
@@ -73,7 +95,7 @@ export async function getRepositoryFiles(
   owner: string,
   repo: string,
   branch: string = "main",
-  force:boolean = false
+  force: boolean = false
 ): Promise<import("@/types/github").RepoFilesResponse> {
   const url = `${API_BASE_URL}/github/repositories/${encodeURIComponent(
     owner
@@ -92,20 +114,7 @@ export async function getRepositoryFiles(
   return res.json();
 }
 
-/**
- * Fetch last-opened repositories for the sidebar / last-opened section.
- * Backend: GET /github/opened-repositories
- * Always returns non-null last_opened_at (backend backfills from created_at).
- */
-export async function getOpenedRepositories(
-  token: string
-): Promise<GithubResponse<import("@/types/github").OpenedRepository[]>> {
-  return fetchGithubJson<GithubResponse<import("@/types/github").OpenedRepository[]>>(
-    "/github/opened-repositories",
-    token,
-    "Failed to fetch opened repositories."
-  );
-}
+
 
 /**
  * Fetch raw contents for up to 100 file paths on a branch.
@@ -138,4 +147,45 @@ export async function getRepositoryFileContents(
   }
 
   return res.json();
+}
+
+
+/**
+ * Fetch last-opened repositories for the sidebar / last-opened section.
+ * Backend: GET /github/opened-repositories
+ * Always returns non-null last_opened_at (backend backfills from created_at).
+ */
+export async function getOpenedRepositories(
+  token: string
+): Promise<GithubResponse<import("@/types/github").OpenedRepository[]>> {
+  return fetchGithubJson<GithubResponse<import("@/types/github").OpenedRepository[]>>(
+    "/github/opened-repositories",
+    token,
+    "Failed to fetch opened repositories."
+  );
+}
+
+/**
+ * Deletes repos by id .
+ * Backend: GET /github/repositories/{repo_id}
+ */
+
+export async function deleteRepositoriesById(
+  token: String,
+  repo_id: string
+) {
+  const res = await fetch(`${API_BASE_URL}/github/repositories/${repo_id}`, {
+    method: 'DELETE',
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+  })
+
+  if (!res.ok) {
+    await handleApiError(res, "Failed to fetch file contents.");
+  }
+
+  return res.json()
+
 }

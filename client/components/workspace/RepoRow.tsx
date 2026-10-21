@@ -12,6 +12,9 @@ export type Repo = {
   pushedAt: string; // ISO date from GitHub
   access: "owner" | "collaborator" | "org";
   indexed: "none" | "indexing" | "ready"; // set by the backend once the repo page has prepared it
+  default_branch: string | null;
+  html_url: string | null;
+
 };
 
 const LANG: Record<string, string> = {

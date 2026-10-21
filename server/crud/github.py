@@ -3,7 +3,8 @@ import httpx
 import uuid
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
-from sqlalchemy.dialects.postgresql import insert,delete
+from sqlalchemy import delete
+from sqlalchemy.dialects.postgresql import insert
 import asyncio
 from urllib.parse import quote
 from models.user import User
@@ -99,26 +100,32 @@ async def get_github_profile(
     return response.json()
 
 
+
 async def get_github_repositories(
     db: AsyncSession,
     firebase_uid: str,
+    page: int = 1,
+    per_page: int = 30,
 ):
     """
-    Fetch repositories accessible to the authenticated GitHub user.
+    Fetch a paginated list of repositories accessible to the authenticated GitHub user.
     """
-
     token = await get_github_token(db, firebase_uid)
 
     if not token:
-        return None
+        return {"repos": [], "page": page, "hasNextPage": False}
 
     async with make_client() as client:
         response = await client.get(
             f"{GITHUB_API_URL}/user/repos",
             headers=github_headers(token),
             params={
-                "per_page": 100,
+                "page": page,
+                "per_page": per_page,
                 "sort": "updated",
+                "direction": "desc",
+                "visibility": "all",
+                "affiliation": "owner,collaborator,organization_member",
             },
         )
 
@@ -126,9 +133,35 @@ async def get_github_repositories(
         raise ValueError("GitHub token is invalid or expired")
 
     response.raise_for_status()
+    raw_repos = response.json()
 
-    return response.json()
+    # Clean and map the response to a lightweight schema including the default branch
+    repos = []
+    for r in raw_repos:
+        repos.append({
+            "id": r.get("id"),
+            "name": r.get("name"),
+            "owner": {
+                "login": r.get("owner", {}).get("login"),
+                "type": r.get("owner", {}).get("type"),
+            },
+            "private": r.get("private"),
+            "description": r.get("description"),
+            "language": r.get("language"),
+            "pushed_at": r.get("pushed_at"),
+            "html_url": r.get("html_url"),
+            "default_branch": r.get("default_branch"),  # Added branch field here
+        })
 
+    # Check GitHub's HTTP Link header to see if a next page exists
+    link_header = response.headers.get("link", "")
+    has_next_page = 'rel="next"' in link_header
+
+    return {
+        "repos": repos,
+        "page": page,
+        "hasNextPage": has_next_page,
+    }
 
 
 async def touch_last_opened(db: AsyncSession, repo: Repository) -> None:

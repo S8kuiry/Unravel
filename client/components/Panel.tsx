@@ -6,7 +6,7 @@ import { Separator } from "react-resizable-panels";
 // A titled card whose body scrolls on its own. Every workspace panel uses this.
 export function Card({
   title, meta, action, children,
-}: { title: string; meta?: string; action?: ReactNode; children: ReactNode }) {
+}: { title: string; meta?: ReactNode; action?: ReactNode; children: ReactNode }) {
   return (
     <section className="flex h-full min-h-0 flex-col overflow-hidden rounded-xl border border-[#2B2723] bg-[#181614]">
       <header className="flex shrink-0 items-center gap-3 border-b border-[#2B2723] px-5 py-3.5">

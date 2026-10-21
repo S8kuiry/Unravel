@@ -50,8 +50,18 @@ export type GithubRepository = {
   description: string | null;
   language: string | null;
   pushed_at: string | null;
+  html_url: string | null;
+  default_branch: string | null;
   owner?: { login?: string; type?: string };
 };
+
+export interface GitHubRepositoriesResponse {
+  status: string;
+  message: string;
+  data: GithubRepository[];
+  page: number;
+  hasNextPage: boolean;
+}
 
 export interface OpenedRepository {
   id: string;
@@ -60,3 +70,6 @@ export interface OpenedRepository {
   /** ISO timestamp — backend guarantees non-null (backfilled from created_at). */
   last_opened_at: string;
 }
+
+
+export type OpenedRepoRow = { id: string; owner: string; name: string; last_opened_at: string };
