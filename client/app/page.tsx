@@ -12,12 +12,12 @@ import { toast } from "sonner";
 function UnravelLogo() {
   return (
     <div className="flex items-end justify-start gap-1">
-      <div className="relative flex h-8 w-8 items-center justify-center rounded-sm bg-gradient-to-br from-orange-400 to-amber-500 font-mono text-xl font-black text-black shadow-lg shadow-orange-500/20 border border-orange-400/40">
-        <span className="text-2xl">U</span>
+      <div className="flex items-center gap-2.5">
+      <span className="flex h-7.5 w-7.5 items-center justify-center rounded-md bg-white text-sm font-bold text-amber-500">
+          U
+        </span>
+        <span className="text-white font-semibold tracking-wider text-sm">nravel</span>
       </div>
-      <span className="font-mono text-lg font-bold tracking-tight text-white">
-        nravel<span className="text-orange-500">.io</span>
-      </span>
     </div>
   );
 }
@@ -47,7 +47,7 @@ export default function Home() {
   const [isLogin, setLogin] = useState(true);
 
   const router = useRouter();
-  const { user, dbUser, loading,fetchDbUser } = useAuth();
+  const { user, dbUser, loading, fetchDbUser } = useAuth();
 
   // Redirect ONLY if the user is already authenticated on initial page load (e.g. revisiting page)
   useEffect(() => {
@@ -56,151 +56,151 @@ export default function Home() {
     }
   }, [loading, user, dbUser, isLoginGoogle, isLoginGit, router]);
 
- // Google Login Handler
-const handleGoogleSignIn = async () => {
-  if (isLoginGoogle || isLoginGit) return;
-  setLoginGoogle(true);
+  // Google Login Handler
+  const handleGoogleSignIn = async () => {
+    if (isLoginGoogle || isLoginGit) return;
+    setLoginGoogle(true);
 
-  try {
-    const provider = new GoogleAuthProvider();
-    provider.setCustomParameters({ prompt: "select_account" });
-    provider.addScope("email");
-    provider.addScope("profile");
+    try {
+      const provider = new GoogleAuthProvider();
+      provider.setCustomParameters({ prompt: "select_account" });
+      provider.addScope("email");
+      provider.addScope("profile");
 
-    const result = await signInWithPopup(auth, provider);
-    const user = result.user;
+      const result = await signInWithPopup(auth, provider);
+      const user = result.user;
 
-    const token = await user.getIdToken();
+      const token = await user.getIdToken();
 
-    const payload: UserSyncRequest = {
-      method: "google",
-      email: user.email || user.providerData[0]?.email || null,
-      display_name: user.displayName || user.providerData[0]?.displayName || null,
-      avatar_url: user.photoURL || user.providerData[0]?.photoURL || null,
-    };
+      const payload: UserSyncRequest = {
+        method: "google",
+        email: user.email || user.providerData[0]?.email || null,
+        display_name: user.displayName || user.providerData[0]?.displayName || null,
+        avatar_url: user.photoURL || user.providerData[0]?.photoURL || null,
+      };
 
-    const res = await syncUser(token, payload);
-    fetchDbUser();
-    
-    if (res.status === "success") {
-      toast.success(`Welcome, ${user.displayName || user.providerData[0]?.displayName || "User"}!`);
-    } else {
-      toast.error("Failed to sync user with backend.");
-    }
+      const res = await syncUser(token, payload);
+      fetchDbUser();
 
-    router.replace("/dashboard");
-
-  } catch (error: any) {
-    if (error?.code === "auth/account-exists-with-different-credential") {
-      const email = error.customData?.email || "this email address";
-      let existingProvider = "GitHub"; // Fallback assumption for Google sign-in
-
-      try {
-        if (error.customData?.email) {
-          const methods = await fetchSignInMethodsForEmail(auth, error.customData.email);
-          if (methods.includes("github.com")) existingProvider = "GitHub";
-          else if (methods.includes("password")) existingProvider = "Email/Password";
-        }
-      } catch (fetchErr) {
-        console.warn("Could not fetch sign-in methods:", fetchErr);
-      }
-
-      toast.error(
-        `An account already exists with ${email} via ${existingProvider}. Please sign in using ${existingProvider}.`
-      );
-    } else {
-      const errorCode = error?.code;
-      if (
-        errorCode === "auth/popup-closed-by-user" ||
-        errorCode === "auth/cancelled-popup-request" ||
-        errorCode === "auth/popup-blocked"
-      ) {
-        toast.warning("Google sign-in popup closed or blocked.");
+      if (res.status === "success") {
+        toast.success(`Welcome, ${user.displayName || user.providerData[0]?.displayName || "User"}!`);
       } else {
-        console.error("Google sign-in error:", error);
-        toast.error(error?.message || "Google sign-in failed");
+        toast.error("Failed to sync user with backend.");
       }
-    }
-  } finally {
-    setLoginGoogle(false);
-  }
-};
 
-// GitHub Login Handler
-const handleGithubSignIn = async () => {
-  if (isLoginGoogle || isLoginGit) return;
-  setLoginGit(true);
+      router.replace("/dashboard");
 
-  try {
-    const provider = new GithubAuthProvider();
-    provider.addScope("user:email");
-    provider.addScope("read:org");
-    provider.addScope("repo");
+    } catch (error: any) {
+      if (error?.code === "auth/account-exists-with-different-credential") {
+        const email = error.customData?.email || "this email address";
+        let existingProvider = "GitHub"; // Fallback assumption for Google sign-in
 
-    const result = await signInWithPopup(auth, provider);
-    const user = result.user;
-
-    const credential = GithubAuthProvider.credentialFromResult(result);
-    const githubAccessToken = credential?.accessToken || null;
-    const githubUsername = getAdditionalUserInfo(result)?.username || null;
-
-    const token = await user.getIdToken();
-
-    const payload: UserSyncRequest = {
-      method: "github",
-      email: user.email || user.providerData[0]?.email || null,
-      display_name: user.displayName || user.providerData[0]?.displayName || null,
-      avatar_url: user.photoURL || user.providerData[0]?.photoURL || null,
-      github_login: githubUsername,
-      github_access_token: githubAccessToken,
-    };
-
-    const res = await syncUser(token, payload);
-    fetchDbUser();
-    
-    if (res.status === "success") {
-      toast.success(`Welcome, ${user.displayName || user.providerData[0]?.displayName || "User"}!`);
-    } else {
-      toast.error("Failed to sync user with backend.");
-    }
-
-    router.replace("/dashboard");
-
-  } catch (error: any) {
-    if (error?.code === "auth/account-exists-with-different-credential") {
-      const email = error.customData?.email || "this email address";
-      let existingProvider = "Google"; // Fallback assumption for GitHub sign-in
-
-      try {
-        if (error.customData?.email) {
-          const methods = await fetchSignInMethodsForEmail(auth, error.customData.email);
-          if (methods.includes("google.com")) existingProvider = "Google";
-          else if (methods.includes("password")) existingProvider = "Email/Password";
+        try {
+          if (error.customData?.email) {
+            const methods = await fetchSignInMethodsForEmail(auth, error.customData.email);
+            if (methods.includes("github.com")) existingProvider = "GitHub";
+            else if (methods.includes("password")) existingProvider = "Email/Password";
+          }
+        } catch (fetchErr) {
+          console.warn("Could not fetch sign-in methods:", fetchErr);
         }
-      } catch (fetchErr) {
-        console.warn("Could not fetch sign-in methods:", fetchErr);
+
+        toast.error(
+          `An account already exists with ${email} via ${existingProvider}. Please sign in using ${existingProvider}.`
+        );
+      } else {
+        const errorCode = error?.code;
+        if (
+          errorCode === "auth/popup-closed-by-user" ||
+          errorCode === "auth/cancelled-popup-request" ||
+          errorCode === "auth/popup-blocked"
+        ) {
+          toast.warning("Google sign-in popup closed or blocked.");
+        } else {
+          console.error("Google sign-in error:", error);
+          toast.error(error?.message || "Google sign-in failed");
+        }
+      }
+    } finally {
+      setLoginGoogle(false);
+    }
+  };
+
+  // GitHub Login Handler
+  const handleGithubSignIn = async () => {
+    if (isLoginGoogle || isLoginGit) return;
+    setLoginGit(true);
+
+    try {
+      const provider = new GithubAuthProvider();
+      provider.addScope("user:email");
+      provider.addScope("read:org");
+      provider.addScope("repo");
+
+      const result = await signInWithPopup(auth, provider);
+      const user = result.user;
+
+      const credential = GithubAuthProvider.credentialFromResult(result);
+      const githubAccessToken = credential?.accessToken || null;
+      const githubUsername = getAdditionalUserInfo(result)?.username || null;
+
+      const token = await user.getIdToken();
+
+      const payload: UserSyncRequest = {
+        method: "github",
+        email: user.email || user.providerData[0]?.email || null,
+        display_name: user.displayName || user.providerData[0]?.displayName || null,
+        avatar_url: user.photoURL || user.providerData[0]?.photoURL || null,
+        github_login: githubUsername,
+        github_access_token: githubAccessToken,
+      };
+
+      const res = await syncUser(token, payload);
+      fetchDbUser();
+
+      if (res.status === "success") {
+        toast.success(`Welcome, ${user.displayName || user.providerData[0]?.displayName || "User"}!`);
+      } else {
+        toast.error("Failed to sync user with backend.");
       }
 
-      toast.error(
-        `An account already exists with ${email} via ${existingProvider}. Please sign in using ${existingProvider}.`
-      );
-    } else {
-      const errorCode = error?.code;
-      if (
-        errorCode === "auth/popup-closed-by-user" ||
-        errorCode === "auth/cancelled-popup-request" ||
-        errorCode === "auth/popup-blocked"
-      ) {
-        toast.warning("GitHub sign-in popup was closed or blocked.");
+      router.replace("/dashboard");
+
+    } catch (error: any) {
+      if (error?.code === "auth/account-exists-with-different-credential") {
+        const email = error.customData?.email || "this email address";
+        let existingProvider = "Google"; // Fallback assumption for GitHub sign-in
+
+        try {
+          if (error.customData?.email) {
+            const methods = await fetchSignInMethodsForEmail(auth, error.customData.email);
+            if (methods.includes("google.com")) existingProvider = "Google";
+            else if (methods.includes("password")) existingProvider = "Email/Password";
+          }
+        } catch (fetchErr) {
+          console.warn("Could not fetch sign-in methods:", fetchErr);
+        }
+
+        toast.error(
+          `An account already exists with ${email} via ${existingProvider}. Please sign in using ${existingProvider}.`
+        );
       } else {
-        console.error("GitHub sign-in error:", error);
-        toast.error(error?.message || "GitHub sign-in failed");
+        const errorCode = error?.code;
+        if (
+          errorCode === "auth/popup-closed-by-user" ||
+          errorCode === "auth/cancelled-popup-request" ||
+          errorCode === "auth/popup-blocked"
+        ) {
+          toast.warning("GitHub sign-in popup was closed or blocked.");
+        } else {
+          console.error("GitHub sign-in error:", error);
+          toast.error(error?.message || "GitHub sign-in failed");
+        }
       }
+    } finally {
+      setLoginGit(false);
     }
-  } finally {
-    setLoginGit(false);
-  }
-};
+  };
 
   return (
     <div className="flex min-h-screen w-full bg-black font-sans fixed inset-x-0 inset-y-0">

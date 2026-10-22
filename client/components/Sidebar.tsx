@@ -59,9 +59,11 @@ const iconBtn =
 
 function Mark() {
   return (
-    <div className="relative flex h-6 w-6 items-center justify-center rounded-sm bg-gradient-to-br from-orange-400 to-amber-500 font-mono text-xl font-black text-black shadow-lg shadow-orange-500/20 border border-orange-400/40">
-      <span className="text-xl mt-1">U</span>
-
+    <div className="flex items-center gap-2.5 ">
+      <span className="flex h-6.5 w-6.5 items-center justify-center rounded-md bg-white text-sm font-bold text-amber-500">
+        U
+      </span>
+      <span className="text-white font-semibold tracking-wider text-sm">nravel</span>
     </div>
   );
 }
@@ -174,9 +176,9 @@ export default function Sidebar({
       >
         {/* Header: the open/close control lives inside the sidebar */}
         <div className="flex h-14 shrink-0 items-center px-3">
-          <div className={` mb-2 flex w-full items-end justify-center gap-2.5 ${collapsed ? "md:hidden" : ""}`}>
+          <div className={` mb-4 pt-8 px-2 flex w-full items-center justify-center gap-2.5 ${collapsed ? "md:hidden" : ""}`}>
             <Mark />
-            <span className={`${serif.className} text-[15px] font-medium text-[#ECE7DF]`}>Unravel</span>
+            {/* <span className={`${serif.className} text-[15px] font-medium text-[#ECE7DF]`}>Unravel</span> */}
             <button onClick={onCloseMobile} aria-label="Close menu" className={`${iconBtn} ml-auto md:hidden`}>
               <X className="h-5 w-5" />
             </button>
@@ -186,7 +188,7 @@ export default function Sidebar({
               title="Collapse sidebar"
               className={`${iconBtn} ml-auto hidden md:block`}
             >
-              <PanelLeftClose className="h-5 w-5" />
+              <PanelLeftClose className="h-4.5 w-4.5" />
             </button>
           </div>
 
@@ -206,7 +208,7 @@ export default function Sidebar({
           )}
         </div>
 
-        <nav className="flex-1 space-y-1 overflow-y-auto px-3 py-2">
+        <nav className="flex-1 space-y-1 overflow-y-auto px-3 py-2 mt-4">
           {/* Primary Navigation Items */}
           {NAV_ITEMS.map((item) => {
             const Icon = item.icon;
@@ -267,7 +269,7 @@ export default function Sidebar({
                 </div>
               ) : (
                 readyRepos.map((r) => {
-                  const active = pathname === `/dashboard/repo/${r.name}`; 
+                  const active = pathname === `/dashboard/repo/${r.name}`;
                   return (
                     <div
                       key={r.href}

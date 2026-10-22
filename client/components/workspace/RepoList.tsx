@@ -5,6 +5,8 @@ import { ChevronLeft, ChevronRight, RefreshCw, Search } from "lucide-react";
 import { Repo, RepoRow } from "./RepoRow";
 import { Card } from "../Panel";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { useQueryClient } from "@tanstack/react-query";
+import { useAuth } from "@/context/AuthContext";
 
 type Props = {
   repos: Repo[];
@@ -14,11 +16,25 @@ type Props = {
   // onRefresh: () => void;
 };
 
-export default function RepoList({ repos, refreshing,currentPage,hasNextPage}: Props) {
+export default function RepoList({ repos, refreshing, currentPage, hasNextPage }: Props) {
   const [q, setQ] = useState("");
+  const { user } = useAuth()
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
+
+  // Inside RepoList:
+  const queryClient = useQueryClient();
+
+  const openedRepos = queryClient.getQueryData<Repo[]>([
+    "opened-repos",
+    user?.uid,
+  ]);
+
+  const openedRepoNames = useMemo(
+    () => new Set(openedRepos?.map((repo) => repo.name) ?? []),
+    [openedRepos]
+  );
 
   const handlePageChange = (newPage: number) => {
     const params = new URLSearchParams(searchParams.toString());
@@ -67,7 +83,7 @@ export default function RepoList({ repos, refreshing,currentPage,hasNextPage}: P
       title="Your repositories"
       meta={String(repos.length)}
       action={paginationHeader}
-      
+
     >
       <div className="sticky top-0 z-10 border-b border-[#2B2723] bg-[#181614] p-3">
         <label className="flex items-center gap-2 rounded-lg border border-[#2B2723] bg-[#121110] px-3 py-2 focus-within:border-[#F5A524]/60">
@@ -99,8 +115,12 @@ export default function RepoList({ repos, refreshing,currentPage,hasNextPage}: P
         </ul>
       ) : shown.length > 0 ? (
         <ul>
-          {shown.map((r) => (
-            <RepoRow key={r.id} repo={r} />
+          {shown.map((repo) => (
+            <RepoRow
+              key={repo.id}
+              repo={repo}
+              isOpened={openedRepoNames.has(repo.name)}
+            />
           ))}
         </ul>
       ) : (

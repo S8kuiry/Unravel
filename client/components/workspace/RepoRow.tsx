@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Check, Globe, Loader2, Lock } from "lucide-react";
+import { Check, CheckCircle2,  Globe, Loader2, Lock } from "lucide-react";
 
 // Shape of one repository from your backend (GitHub list plus your own index status)
 export type Repo = {
@@ -35,7 +35,10 @@ export function timeAgo(iso: string) {
 }
 
 // compact = used inside a group that already shows the owner, so the prefix and badge are dropped
-export function RepoRow({ repo, compact = false }: { repo: Repo; compact?: boolean }) {
+export function RepoRow({
+  repo,
+  compact = false,
+  isOpened = false }: { repo: Repo; compact?: boolean, isOpened?: boolean; }) {
   const shared = repo.access !== "owner";
   const Vis = repo.private ? Lock : Globe;
 
@@ -82,9 +85,16 @@ export function RepoRow({ repo, compact = false }: { repo: Repo; compact?: boole
       )}
 
       {/* Looks like a button, but the stretched link above does the navigating */}
-      <span className="shrink-0 rounded-md border border-[#F5A524]/40 px-3 py-1.5 text-xs font-medium text-[#F5A524] transition-colors group-hover:bg-[#F5A524]/10">
-        Open
-      </span>
+      {isOpened ? (
+        <span className="flex shrink-0 items-center gap-1.5 rounded-md border border-emerald-500/20 bg-emerald-500/5 px-3 py-1.5 text-xs font-medium text-emerald-400">
+          <CheckCircle2 className="h-3.5 w-3.5" />
+          Opened
+        </span>
+      ) : (
+        <span className="flex shrink-0 items-center gap-1.5 rounded-md border border-[#F5A524]/40 px-3 py-1.5 text-xs font-medium text-[#F5A524] transition-colors group-hover:bg-[#F5A524]/10">
+          Open
+        </span>
+      )}
     </li>
   );
 }
