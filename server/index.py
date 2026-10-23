@@ -17,8 +17,7 @@ app = FastAPI(
 )
 
 # Get frontend URL from environment variable, defaulting to localhost for development
-FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:3000")
-
+FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:3000").strip().rstrip("/")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[FRONTEND_URL],
