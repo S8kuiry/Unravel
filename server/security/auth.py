@@ -9,22 +9,22 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# Build absolute path to the JSON key file located in the same directory (security/)
-CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
-
-# Find any firebase-adminsdk JSON file in this directory automatically
-json_files = [f for f in os.listdir(CURRENT_DIR) if f.endswith(".json")]
-if not json_files:
-    raise RuntimeError("No Firebase service account JSON key found in security/ directory")
-
-KEY_PATH = os.path.join(CURRENT_DIR, json_files[0])
-
-# Initialize Firebase Admin SDK with the service account key
+# Initialize Firebase Admin SDK using application default credentials 
+# or explicit project configuration via environment variables
 try:
     firebase_admin.get_app()
 except ValueError:
-    cred = credentials.Certificate(KEY_PATH)
-    firebase_admin.initialize_app(cred)
+    project_id = os.getenv("FIREBASE_PROJECT_ID")
+    if project_id:
+        # If running in an environment where ADC (Application Default Credentials) 
+        # or project-level initialization is supported:
+        cred = credentials.ApplicationDefault()
+        firebase_admin.initialize_app(cred, {
+            'projectId': project_id
+        })
+    else:
+        # Fallback basic initialization
+        firebase_admin.initialize_app()
 
 # Reads the "Authorization: Bearer <token>" header
 bearer_scheme = HTTPBearer(auto_error=False)

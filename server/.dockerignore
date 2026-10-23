@@ -1,0 +1,17 @@
+# Python artifacts
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.venv/
+venv/
+env/
+
+# Environment and config files
+.env
+.git/
+.gitignore
+
+# Documentation and tests
+README.md
+tests/

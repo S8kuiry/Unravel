@@ -1,0 +1,16 @@
+# Node artifacts
+node_modules/
+.next/
+out/
+build/
+dist/
+
+# Environment and git files
+.env
+.env*.local
+.git/
+.gitignore
+
+# Documentation and testing
+README.md
+*.log
