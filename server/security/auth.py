@@ -42,7 +42,7 @@ def get_current_uid(
         decoded = firebase_auth.verify_id_token(credentials.credentials)
     except firebase_auth.ExpiredIdTokenError:
         raise HTTPException(status_code=401, detail="Token expired")
-    except (firebase_auth.InvalidIdTokenError, ValueError):
+    except Exception:
         raise HTTPException(status_code=401, detail="Invalid token")
 
     return decoded["uid"]

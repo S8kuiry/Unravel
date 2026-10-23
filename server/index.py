@@ -1,6 +1,10 @@
 
 
-from fastapi import FastAPI,Depends
+import os
+from dotenv import load_dotenv
+load_dotenv()
+
+from fastapi import FastAPI, Depends
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
 from routers.user import router as user_router
@@ -12,10 +16,12 @@ app = FastAPI(
     version="1.0.0",
 )
 
-# Enable CORS for Next.js frontend running on port 3000
+# Get frontend URL from environment variable, defaulting to localhost for development
+FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:3000")
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[FRONTEND_URL],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

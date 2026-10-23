@@ -9,22 +9,25 @@ from models.user import GithubApproveRequest, UserSyncRequest, UserResponse, Use
 
 router = APIRouter(prefix="/user",tags=["User"])
 
-@router.post("/sync",response_model=UserSyncResponse)
+@router.post("/sync", response_model=UserSyncResponse)
 async def sync_user(
     body: UserSyncRequest,
     uid: str = Depends(get_current_uid),
     db: AsyncSession = Depends(get_db),
 ):
-    user =  await upsert_user(
-        db,
-        firebase_uid=uid,
-        method=body.method,
-        email=body.email,
-        display_name=body.display_name,
-        avatar_url=body.avatar_url,
-        github_login=body.github_login,
-        github_token=body.github_access_token,
-    )
+    try:
+        user = await upsert_user(
+            db,
+            firebase_uid=uid,
+            method=body.method,
+            email=body.email,
+            display_name=body.display_name,
+            avatar_url=body.avatar_url,
+            github_login=body.github_login,
+            github_token=body.github_access_token,
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"User sync failed: {str(e)}")
 
     return {
             "status": "success",
