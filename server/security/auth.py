@@ -16,10 +16,8 @@ try:
 except ValueError:
     project_id = os.getenv("FIREBASE_PROJECT_ID")
     if project_id:
-        # If running in an environment where ADC (Application Default Credentials) 
-        # or project-level initialization is supported:
-        cred = credentials.ApplicationDefault()
-        firebase_admin.initialize_app(cred, {
+        # Initialize with project options directly—no credentials file needed for token verification
+        firebase_admin.initialize_app(options={
             'projectId': project_id
         })
     else:
