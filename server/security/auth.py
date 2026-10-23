@@ -1,31 +1,18 @@
 import os
 from typing import Optional
-
-import firebase_admin
+import requests
+import jwt
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from firebase_admin import credentials, auth as firebase_auth
 from dotenv import load_dotenv
 
 load_dotenv()
 
-# Initialize Firebase Admin SDK using application default credentials 
-# or explicit project configuration via environment variables
-try:
-    firebase_admin.get_app()
-except ValueError:
-    project_id = os.getenv("FIREBASE_PROJECT_ID")
-    if project_id:
-        # Initialize with project options directly—no credentials file needed for token verification
-        firebase_admin.initialize_app(options={
-            'projectId': project_id
-        })
-    else:
-        # Fallback basic initialization
-        firebase_admin.initialize_app()
-
-# Reads the "Authorization: Bearer <token>" header
+PROJECT_ID = os.getenv("FIREBASE_PROJECT_ID", "unravel-subharthy")
 bearer_scheme = HTTPBearer(auto_error=False)
+
+# Google's official public keys endpoint for Firebase Auth ID tokens
+GOOGLE_CERTS_URL = "https://www.googleapis.com/robot/v1/metadata/x509/securetoken@system.gserviceaccount.com"
 
 
 def get_current_uid(
@@ -38,11 +25,32 @@ def get_current_uid(
             headers={"WWW-Authenticate": "Bearer"},
         )
 
+    token = credentials.credentials
     try:
-        decoded = firebase_auth.verify_id_token(credentials.credentials)
-    except firebase_auth.ExpiredIdTokenError:
+        # Fetch Google's public signing keys
+        resp = requests.get(GOOGLE_CERTS_URL, timeout=5)
+        public_keys = resp.json()
+
+        # Extract the key ID from the token header
+        unverified_header = jwt.get_unverified_header(token)
+        kid = unverified_header.get("kid")
+        if not kid or kid not in public_keys:
+            raise HTTPException(status_code=401, detail="Invalid token signature key")
+
+        pem_cert = public_keys[kid]
+
+        # Verify token signature, expiration, audience, and issuer securely
+        decoded = jwt.decode(
+            token,
+            pem_cert,
+            algorithms=["RS256"],
+            audience=PROJECT_ID,
+            issuer=f"https://securetoken.google.com/{PROJECT_ID}",
+        )
+
+        return decoded["sub"]
+
+    except jwt.ExpiredSignatureError:
         raise HTTPException(status_code=401, detail="Token expired")
     except Exception:
         raise HTTPException(status_code=401, detail="Invalid token")
-
-    return decoded["uid"]
