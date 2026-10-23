@@ -5,7 +5,6 @@ pydantic[email]>=2.6.0
 pydantic-settings>=2.2.0
 python-dotenv>=1.0.1
 python-multipart>=0.0.9
-python-dotenv>=1.0.1
 
 # --- Database (Neon Postgres, async) ---
 sqlalchemy>=2.0.25
@@ -17,3 +16,4 @@ greenlet>=3.0.0
 PyJWT>=2.8.0
 requests>=2.31.0
 cryptography>=42.0.0
+firebase-admin>=6.5.0

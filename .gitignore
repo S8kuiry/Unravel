@@ -4,4 +4,4 @@ server/security/*.json
 
 # Python Cache
 __pycache__/
-*.pyc
+*.pyc*-firebase-adminsdk-*.json
