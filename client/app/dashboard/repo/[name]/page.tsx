@@ -22,6 +22,7 @@ import { auth } from "@/app/config/firebase";
 import { isGithubTokenExpired } from "@/lib/github-session";
 import { useExpandedFolders } from "@/lib/useExpandedFolders";
 import { OpenedRepoRow } from "@/types/github";
+import BranchSelector from "@/components/workspace/BranchSelector";
 
 export default function RepoWorkspacePage({
     params,
@@ -76,6 +77,13 @@ export default function RepoWorkspacePage({
             return res.data; // { files, branch, truncated }
         },
     });
+
+    // ✅ Sync branch state safely when query succeeds
+    useEffect(() => {
+        if (filesQuery.data?.branch && filesQuery.data.branch !== currentBranch) {
+            setCurrentBranch(filesQuery.data.branch);
+        }
+    }, [filesQuery.data?.branch, currentBranch]);
 
     const files = filesQuery.data?.files ?? [];
     const branch = filesQuery.data?.branch ?? currentBranch;
@@ -238,14 +246,34 @@ export default function RepoWorkspacePage({
 
             {/* Header */}
             <div className="flex items-center justify-between pb-4 shrink-0">
-                <div>
-                    <h1 className={`${serif.className} text-2xl font-medium text-[#ECE7DF]`}>
-                        {owner ? `${owner}/${repoName}` : repoName}
-                    </h1>
-                    <p className="mt-0.5 text-xs text-[#A39B90]">
-                        {branch} branch • {files.length} files{truncated ? " • truncated" : ""}
-                    </p>
+                <div className="flex items-start justify-start gap-6">
+                    <div>
+                        <h1 className={`${serif.className} text-2xl font-medium text-[#ECE7DF]`}>
+                            {owner ? `${owner}/${repoName}` : repoName}
+                        </h1>
+                        <p className="mt-0.5 text-xs text-[#A39B90]">
+                            {branch} branch • {files.length} files{truncated ? " • truncated" : ""}
+                        </p>
+
+                    </div>
+                    <BranchSelector
+                        owner={owner}
+                        repoName={repoName}
+                        currentBranch={currentBranch}
+                        onSelectBranch={(newBranch) => {
+                            setCurrentBranch(newBranch);
+                            // Clear active file search parameter when switching branches
+                            const params = new URLSearchParams(window.location.search);
+                            params.delete("file");
+                            window.history.replaceState(null, "", `${window.location.pathname}?${params.toString()}`);
+
+                            // Explicitly invalidate repo contents and files for the new branch context
+                            queryClient.invalidateQueries({ queryKey: ["repo-files", owner, repoName] });
+                            queryClient.invalidateQueries({ queryKey: ["repo-content", owner, repoName] });
+                        }}
+                    />
                 </div>
+
                 <div className="flex items-center gap-2">
                     <span className="rounded-md border border-[#2B2723] bg-[#181614] px-2.5 py-1 text-xs font-medium text-[#F5A524]">
                         Indexed

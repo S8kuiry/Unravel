@@ -85,6 +85,31 @@ export async function getGithubRepositories(
   return res.json();
 }
 
+/**
+ * Fetch repository branches.
+ */
+export async function getGithubRepoBranches(
+  token: string,
+  owner : string,
+  repo_name : string
+): Promise<GitHubRepositoriesResponse> {
+  const res = await fetch(`${API_BASE_URL}/github/repositories/${encodeURIComponent(owner)}/${encodeURIComponent(repo_name)}/branches`, {
+    method: "GET",
+    headers: {
+      "Authorization": `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+  });
+
+  if (!res.ok) {
+    await handleApiError(res, "Failed to fetch Github Repositories.");
+
+  }
+
+  return res.json();
+}
+
+
 
 /**
  * Fetch filtered file tree for a repo branch.

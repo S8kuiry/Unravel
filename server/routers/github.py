@@ -9,7 +9,8 @@ from crud.github import (
     get_repository_files,
     get_repository_file_contents,
     get_opened_repositories,
-    delete_repo_by_id
+    delete_repo_by_id,
+    get_github_repository_branches
 )
 from models.github import FileContentsRequest
 import uuid
@@ -102,6 +103,44 @@ async def github_repositories(
             detail="Failed to fetch GitHub repositories",
         )
 
+
+@router.get("/repositories/{owner}/{repo_name}/branches")
+async def github_repository_branches(
+    owner: str,
+    repo_name: str,
+    uid: str = Depends(get_current_uid),
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        branches = await get_github_repository_branches(
+            db=db,
+            firebase_uid=uid,
+            owner=owner,
+            repo_name=repo_name,
+        )
+
+        return {
+            "status": "success",
+            "message": "GitHub repository branches fetched successfully",
+            "data": branches["branches"],
+        }
+
+    except ValueError as e:
+        raise HTTPException(
+            status_code=401,
+            detail=str(e),
+        )
+
+    except HTTPException:
+        raise
+
+    except Exception:
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to fetch GitHub repository branches",
+        )
+
+    
 
 @router.get("/repositories/{owner}/{repo}/files")
 async def repository_files(

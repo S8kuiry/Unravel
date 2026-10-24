@@ -151,6 +151,11 @@ async def get_github_repositories(
             "pushed_at": r.get("pushed_at"),
             "html_url": r.get("html_url"),
             "default_branch": r.get("default_branch"),  # Added branch field here
+            "branches": [
+                b.get("name")
+                for b in branches_response.json()
+            ],
+
         })
 
     # Check GitHub's HTTP Link header to see if a next page exists
@@ -162,6 +167,58 @@ async def get_github_repositories(
         "page": page,
         "hasNextPage": has_next_page,
     }
+
+
+async def get_github_repository_branches(
+    db: AsyncSession,
+    firebase_uid: str,
+    owner: str,
+    repo_name: str,
+):
+    """
+    Fetch all branches of a GitHub repository,
+    automatically handling pagination.
+    """
+    token = await get_github_token(db, firebase_uid)
+
+    if not token:
+        return {"branches": []}
+
+    branches = []
+    page = 1
+
+    async with make_client() as client:
+        while True:
+            response = await client.get(
+                f"{GITHUB_API_URL}/repos/{owner}/{repo_name}/branches",
+                headers=github_headers(token),
+                params={
+                    "page": page,
+                    "per_page": 100,
+                },
+            )
+
+            if response.status_code == 401:
+                raise ValueError("GitHub token is invalid or expired")
+
+            response.raise_for_status()
+
+            raw_branches = response.json()
+
+            branches.extend(
+                branch["name"]
+                for branch in raw_branches
+            )
+
+            # GitHub indicates whether another page exists
+            link_header = response.headers.get("Link", "")
+
+            if 'rel="next"' not in link_header:
+                break
+
+            page += 1
+
+    return {"branches": branches}
 
 
 async def touch_last_opened(db: AsyncSession, repo: Repository) -> None:
