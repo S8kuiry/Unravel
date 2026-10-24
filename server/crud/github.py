@@ -151,10 +151,7 @@ async def get_github_repositories(
             "pushed_at": r.get("pushed_at"),
             "html_url": r.get("html_url"),
             "default_branch": r.get("default_branch"),  # Added branch field here
-            "branches": [
-                b.get("name")
-                for b in branches_response.json()
-            ],
+            
 
         })
 

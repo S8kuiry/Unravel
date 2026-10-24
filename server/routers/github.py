@@ -97,10 +97,16 @@ async def github_repositories(
     except HTTPException:
         raise
 
-    except Exception:
+    except Exception as e:
+        # --- ADD THESE LINES FOR DEBUGGING ---
+        import traceback
+        traceback.print_exc()
+        print(f"CRITICAL ERROR IN /repositories: {str(e)}")
+        # -------------------------------------
+        
         raise HTTPException(
             status_code=500,
-            detail="Failed to fetch GitHub repositories",
+            detail=f"Failed to fetch GitHub repositories: {str(e)}", # Temporarily expose message
         )
 
 
