@@ -5,7 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { Group, Panel } from "react-resizable-panels";
 import { sans, serif } from "@/app/config/font";
 import { Check, Copy, RefreshCw, Send, Sparkles } from "lucide-react";
-import { Card, Handle } from "@/components/Panel";
+import { Card, Handle, GithubMark } from "@/components/Panel";
 import { useAuth } from "@/context/AuthContext";
 import {
     getRepositoryFileContents,
@@ -16,8 +16,9 @@ import FileViewer from "@/components/workspace/FileViewer";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect } from "react";
 import { toast } from "sonner";
-import { disconnectGithub } from "@/api/user";
-import { GithubAuthProvider, unlink } from "firebase/auth";
+import { disconnectGithub, approveGithub } from "@/api/user";
+import { GithubApproveRequest } from "@/types/user";
+import { GithubAuthProvider, linkWithPopup, signInWithPopup, getAdditionalUserInfo, unlink } from "firebase/auth";
 import { auth } from "@/app/config/firebase";
 import { isGithubTokenExpired } from "@/lib/github-session";
 import { useExpandedFolders } from "@/lib/useExpandedFolders";
@@ -46,6 +47,7 @@ export default function RepoWorkspacePage({
         `unravel:expanded:${owner}/${repoName}:${currentBranch}`,
         activeFile
     );
+    const [loginGit, setLoginGit] = useState(false);
 
 
     /* ---------- File Select Function ---------- */
@@ -57,6 +59,82 @@ export default function RepoWorkspacePage({
         params.set("file", path);
         window.history.replaceState(null, "", `${window.location.pathname}?${params.toString()}`);
     }, []);
+
+    // GitHub login handler (reused from dashboard /workspace)
+    const handleGithubConnect = async () => {
+        if (loginGit) return;
+
+        const currentUser = auth.currentUser;
+        if (!currentUser) {
+            toast.error("You must be logged in to connect GitHub.");
+            return;
+        }
+
+        setLoginGit(true);
+
+        try {
+            const provider = new GithubAuthProvider();
+            provider.addScope("user:email");
+            provider.addScope("read:org");
+            provider.addScope("repo");
+
+            const isAlreadyLinked = currentUser.providerData.some(
+                (p) => p.providerId === GithubAuthProvider.PROVIDER_ID
+            );
+
+            let githubAccessToken: string | null = null;
+            let githubUsername: string | null = null;
+
+            if (!isAlreadyLinked) {
+                const result = await linkWithPopup(currentUser, provider);
+                const credential = GithubAuthProvider.credentialFromResult(result);
+                githubAccessToken = credential?.accessToken || null;
+                githubUsername = getAdditionalUserInfo(result)?.username || null;
+            } else {
+                const result = await signInWithPopup(auth, provider);
+                const credential = GithubAuthProvider.credentialFromResult(result);
+                githubAccessToken = credential?.accessToken || null;
+                githubUsername = getAdditionalUserInfo(result)?.username || null;
+            }
+
+            const token = await getAuthToken(true);
+            if (!token) {
+                toast.error("Authentication token not found.");
+                return;
+            }
+
+            const payload: GithubApproveRequest = {
+                github_access_token: githubAccessToken || "",
+                github_login: githubUsername || "",
+            };
+
+            const res = await approveGithub(token, payload);
+            await fetchDbUser();
+
+            if (res.status === "success") {
+                toast.success("GitHub Connected successfully!");
+            }
+        } catch (error: unknown) {
+            console.error("GitHub connect error:", error);
+            const errorCode =
+                typeof error === "object" && error !== null && "code" in error
+                    ? error.code
+                    : undefined;
+            if (
+                errorCode === "auth/popup-closed-by-user" ||
+                errorCode === "auth/cancelled-popup-request" ||
+                errorCode === "auth/popup-blocked"
+            ) {
+                toast.warning("GitHub sign-in popup was closed or blocked.");
+            } else {
+                toast.error("GitHub connection failed.");
+            }
+        } finally {
+            setLoginGit(false);
+        }
+    };
+
+    /* ---------- File list ---------- */
 
 
     /* ---------- File list ---------- */
@@ -211,8 +289,10 @@ export default function RepoWorkspacePage({
 
 
 
-    // Token expired mid-session: auto-disconnect (same flow as sidebar/dashboard)
-    // and send user to the connect view. Expiry notice is toast-only.
+    // Token expired mid-session: clean up GitHub session (unlink Firebase provider,
+    // revoke backend token) but stay on this page so the connect card above remains
+    // visible and usable. The connect card drives the actual reconnect flow via
+    // handleGithubConnect().
     useEffect(() => {
         if (!filesExpired) return;
         let cancelled = false;
@@ -234,7 +314,6 @@ export default function RepoWorkspacePage({
                 if (cancelled) return;
                 await fetchDbUser();
                 toast.warning("GitHub session expired — please reconnect.");
-                router.replace("/dashboard");
             }
         })();
         return () => {
@@ -245,30 +324,7 @@ export default function RepoWorkspacePage({
     return (
         <div className={`flex h-[calc(100dvh-3.0rem)] min-h-[560px] w-full flex-col ${sans.className}`}>
 
-        <button
-    onClick={async () => {
-        if (!activeFile || !fileContent) {
-            alert("Please select a file first!");
-            return;
-        }
-
-        try {
-            console.log("Sending file for chunking:", activeFile);
-            const result = await testChunkFile(activeFile, fileContent);
-            
-            console.log("Chunking Result:", result);
-            alert(`Success! Generated ${result.total_chunks} chunks. Check your browser console for details.`);
-        } catch (error) {
-            console.error("Chunking test failed:", error);
-            alert(`Error: ${error instanceof Error ? error.message : "Unknown error"}`);
-        }
-    }}
-    className="cursor-pointer flex items-center gap-1.5 rounded-md border border-[#2B2723] bg-[#0E0D0C] px-2.5 py-1 text-xs font-medium text-[#ECE7DF] transition-colors hover:border-[#F5A524] hover:text-[#F5A524]"
-    title="Test backend chunking on active file"
->
-    <Sparkles className="h-3 w-3 text-[#F5A524]" />
-    <span>Test Chunking</span>
-</button>
+       
 
             {/* Header */}
             <div className="flex items-center justify-between pb-4 shrink-0">
@@ -309,7 +365,26 @@ export default function RepoWorkspacePage({
 
             {/* Main Resizable Workspace */}
             <div className="min-h-0 flex-1">
-                <Group orientation="horizontal">
+                {filesExpired ? (
+                    <div className="mx-auto mt-20 max-w-md text-center">
+                        <div className="mx-auto grid h-14 w-14 place-items-center rounded-xl border border-[#2B2723] bg-[#181614] text-[#ECE7DF]">
+                            <GithubMark className="h-7 w-7" />
+                        </div>
+                        <h1 className={`${serif.className} mt-6 text-3xl font-medium text-[#ECE7DF]`}>
+                            Connect your GitHub account
+                        </h1>
+                        <p className="mt-3 text-sm leading-relaxed text-[#A39B90]">
+                            Your GitHub session has expired. Reconnect to browse repository files and ask questions about this codebase.
+                        </p>
+                        <button
+                            onClick={handleGithubConnect}
+                            className="mt-6 inline-flex items-center gap-2 rounded-lg bg-[#F5A524] px-4 py-2.5 text-sm font-medium text-[#1A1206] outline-none transition-colors hover:bg-[#FBBF4D]"
+                        >
+                            <GithubMark /> Connect GitHub
+                        </button>
+                    </div>
+                ) : (
+                    <Group orientation="horizontal">
 
                     {/* LEFT PANEL: Codebase Explorer & File Content */}
                     <Panel id="codebase-view" defaultSize={65} minSize={35}>
@@ -440,7 +515,9 @@ export default function RepoWorkspacePage({
                         </Card>
                     </Panel>
 
-                </Group>
+                    </Group>
+                )
+            }
             </div>
 
         </div>

@@ -379,6 +379,42 @@ async def get_repository_files(
         if is_necessary_file(i)
     ]
 
+        # --- remember old shas (used for ghost cleanup now, change detection later) ---
+    old_result = await db.execute(
+        select(RepoFile.path, RepoFile.sha).where(
+            RepoFile.repo_id == db_repo.id,
+            RepoFile.branch == branch,
+        )
+    )
+    old_shas = {p: s for p, s in old_result.all()}
+
+    # --- ghost cleanup: files deleted/ignored upstream ---
+    if not data.get("truncated", False):
+        new_paths = {f["path"] for f in filtered_files}
+        ghost_paths = [p for p in old_shas if p not in new_paths]
+
+        if ghost_paths:
+            # chunks are removed by the FK cascade
+            await db.execute(
+                delete(RepoFile).where(
+                    RepoFile.repo_id == db_repo.id,
+                    RepoFile.branch == branch,
+                    RepoFile.path.in_(ghost_paths),
+                )
+            )
+            # blobs are path-keyed: drop only if no branch still has the path
+            still_used = select(RepoFile.path).where(
+                RepoFile.repo_id == db_repo.id,
+                RepoFile.path.in_(ghost_paths),
+            )
+            await db.execute(
+                delete(RepoBlob).where(
+                    RepoBlob.repo_id == db_repo.id,
+                    RepoBlob.path.in_(ghost_paths),
+                    RepoBlob.path.not_in(still_used),
+                )
+            )
+
     if db_repo and filtered_files:
         print(f"Bulk saving {len(filtered_files)} files for repo ID: {db_repo.id}")
         
