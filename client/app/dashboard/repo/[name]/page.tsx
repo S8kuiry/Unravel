@@ -23,6 +23,7 @@ import { isGithubTokenExpired } from "@/lib/github-session";
 import { useExpandedFolders } from "@/lib/useExpandedFolders";
 import { OpenedRepoRow } from "@/types/github";
 import BranchSelector from "@/components/workspace/BranchSelector";
+import { testChunkFile } from "@/api/ingestion";
 
 export default function RepoWorkspacePage({
     params,
@@ -243,6 +244,31 @@ export default function RepoWorkspacePage({
 
     return (
         <div className={`flex h-[calc(100dvh-3.0rem)] min-h-[560px] w-full flex-col ${sans.className}`}>
+
+        <button
+    onClick={async () => {
+        if (!activeFile || !fileContent) {
+            alert("Please select a file first!");
+            return;
+        }
+
+        try {
+            console.log("Sending file for chunking:", activeFile);
+            const result = await testChunkFile(activeFile, fileContent);
+            
+            console.log("Chunking Result:", result);
+            alert(`Success! Generated ${result.total_chunks} chunks. Check your browser console for details.`);
+        } catch (error) {
+            console.error("Chunking test failed:", error);
+            alert(`Error: ${error instanceof Error ? error.message : "Unknown error"}`);
+        }
+    }}
+    className="cursor-pointer flex items-center gap-1.5 rounded-md border border-[#2B2723] bg-[#0E0D0C] px-2.5 py-1 text-xs font-medium text-[#ECE7DF] transition-colors hover:border-[#F5A524] hover:text-[#F5A524]"
+    title="Test backend chunking on active file"
+>
+    <Sparkles className="h-3 w-3 text-[#F5A524]" />
+    <span>Test Chunking</span>
+</button>
 
             {/* Header */}
             <div className="flex items-center justify-between pb-4 shrink-0">
