@@ -82,7 +82,7 @@ export function FileTreeNode({
                     }`}
             >
                 <File className="h-3.5 w-3.5 shrink-0" />
-                <span className="truncate">{node.name}</span>
+                <span className="min-w-0 truncate">{node.name}</span>
             </button>
         );
     }
@@ -104,7 +104,7 @@ export function FileTreeNode({
                 ) : (
                     <Folder className="h-3.5 w-3.5 shrink-0 text-[#F5A524]" />
                 )}
-                <span className="truncate font-medium">{node.name}</span>
+                <span className="min-w-0 truncate font-medium">{node.name}</span>
             </button>
 
             {isOpen && (

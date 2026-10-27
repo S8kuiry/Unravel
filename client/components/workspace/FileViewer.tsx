@@ -1,5 +1,5 @@
-import React, { useMemo } from "react";
-import { Highlight, type PrismTheme } from "prism-react-renderer";
+import React, { useEffect, useMemo, useState } from "react";
+import { Highlight, Prism, type PrismTheme } from "prism-react-renderer";
 
 interface FileViewerProps {
   activeFile: string | null;
@@ -57,6 +57,7 @@ const LANGUAGE_BY_EXT: Record<string, string> = {
   swift: "swift",
   graphql: "graphql",
   gql: "graphql",
+  java: "java", 
 };
 
 function getLanguage(path: string | null): string {
@@ -180,9 +181,21 @@ export default function FileViewer({
 }: FileViewerProps) {
   const language = useMemo(() => getLanguage(activeFile), [activeFile]);
   const code = useMemo(() => fileContent.replace(/\n$/, ""), [fileContent]);
+  const [javaGrammarReady, setJavaGrammarReady] = useState(false);
+
+  useEffect(() => {
+    if (language !== "java" || javaGrammarReady) return;
+
+    // prism-react-renderer ships a small grammar set; expose its Prism instance
+    // before loading PrismJS's Java grammar so both use the same registry.
+    (globalThis as typeof globalThis & { Prism?: typeof Prism }).Prism = Prism;
+    void import("prismjs/components/prism-java").then(() => {
+      setJavaGrammarReady(true);
+    });
+  }, [javaGrammarReady, language]);
 
   return (
-    <div className="relative flex-1 overflow-auto bg-[#0E0D0C] p-4">
+    <div className="relative min-w-0 flex-1 overflow-auto bg-[#0E0D0C] p-4">
       {!activeFile ? (
         <EmptyState />
       ) : contentLoading ? (
@@ -190,7 +203,7 @@ export default function FileViewer({
       ) : contentError ? (
         <ErrorState message={contentError} />
       ) : (
-        <Highlight theme={unravelTheme} code={code} language={language}>
+        <Highlight prism={Prism} theme={unravelTheme} code={code} language={language}>
           {({ tokens, getLineProps, getTokenProps }) => (
             <pre className="m-0 min-w-max bg-transparent font-mono text-xs leading-relaxed">
               <code className="block">

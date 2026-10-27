@@ -25,7 +25,6 @@ import { isGithubTokenExpired } from "@/lib/github-session";
 import { useExpandedFolders } from "@/lib/useExpandedFolders";
 import { OpenedRepoRow } from "@/types/github";
 import BranchSelector from "@/components/workspace/BranchSelector";
-import { testChunkFile } from "@/api/ingestion";
 
 export default function RepoWorkspacePage({
     params,
@@ -40,6 +39,8 @@ export default function RepoWorkspacePage({
     const router = useRouter();
     const { getAuthToken, fetchDbUser } = useAuth();
     const [currentBranch, setCurrentBranch] = useState("main");
+    const [fileTreeWidth, setFileTreeWidth] = useState(224);
+    const fileTreeResizeStart = useRef<{ pointerId: number; startX: number; startWidth: number } | null>(null);
     const activeFile = searchParams.get("file");
     const [chatInput, setChatInput] = useState("");
     const [copied, setCopied] = useState(false);
@@ -458,7 +459,10 @@ export default function RepoWorkspacePage({
                         >
                             <div className="flex h-full min-h-0">
                                 {/* File Tree */}
-                                <div className="w-56 shrink-0 border-r border-[#2B2723] bg-[#141210] p-2 overflow-y-auto">
+                                <div
+                                    className="shrink-0 border-r border-[#2B2723] bg-[#141210] p-2 overflow-auto"
+                                    style={{ width: fileTreeWidth }}
+                                >
                                     <div className="mb-2 px-2 text-[10px] font-semibold uppercase tracking-wider text-[#6F675D]">
                                         Files
                                     </div>
@@ -491,6 +495,37 @@ export default function RepoWorkspacePage({
                                         />
                                     ))}
                                 </div>
+
+                                <div
+                                    role="separator"
+                                    aria-label="Resize file explorer"
+                                    aria-orientation="vertical"
+                                    tabIndex={0}
+                                    className="w-1 shrink-0 cursor-col-resize touch-none bg-[#141210]  transition-colors hover:bg-[#F5A524] active:bg-[#F5A524]"
+                                    onPointerDown={(event) => {
+                                        fileTreeResizeStart.current = {
+                                            pointerId: event.pointerId,
+                                            startX: event.clientX,
+                                            startWidth: fileTreeWidth,
+                                        };
+                                        event.currentTarget.setPointerCapture(event.pointerId);
+                                    }}
+                                    onPointerMove={(event) => {
+                                        const start = fileTreeResizeStart.current;
+                                        if (!start || start.pointerId !== event.pointerId) return;
+                                        setFileTreeWidth(Math.min(420, Math.max(160, start.startWidth + event.clientX - start.startX)));
+                                    }}
+                                    onPointerUp={() => {
+                                        fileTreeResizeStart.current = null;
+                                    }}
+                                    onPointerCancel={() => {
+                                        fileTreeResizeStart.current = null;
+                                    }}
+                                    onKeyDown={(event) => {
+                                        if (event.key === "ArrowLeft") setFileTreeWidth((width) => Math.max(160, width - 16));
+                                        if (event.key === "ArrowRight") setFileTreeWidth((width) => Math.min(420, width + 16));
+                                    }}
+                                />
 
                                 {/* File Viewer with Sticky/Header Copy Action */}
                                 <FileViewer

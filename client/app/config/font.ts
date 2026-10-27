@@ -1,4 +1,29 @@
-import { Instrument_Sans, JetBrains_Mono,Space_Grotesk } from "next/font/google";
-// UI text uses the sans; brand name and page titles use the serif.
-export const sans = Instrument_Sans({ subsets: ["latin"] });
-export const serif = Space_Grotesk({ subsets: ["latin"], weight: ["600", "700"] });
+import localFont from "next/font/local";
+
+// Self-hosted fonts to avoid the Next.js 16 Turbopack build error with
+// next/font/google ("Module not found: .../internal/font/google/font").
+// Font files are self-hosted under public/fonts/space-grotesk/.
+export const sans = localFont({
+  src: [
+    {
+      path: "../../public/fonts/space-grotesk/InstrumentSans-400.ttf",
+      weight: "400",
+      style: "normal",
+    },
+  ],
+});
+
+export const serif = localFont({
+  src: [
+    {
+      path: "../../public/fonts/space-grotesk/SpaceGrotesk-600.ttf",
+      weight: "600",
+      style: "normal",
+    },
+    {
+      path: "../../public/fonts/space-grotesk/SpaceGrotesk-700.ttf",
+      weight: "700",
+      style: "normal",
+    },
+  ],
+});
