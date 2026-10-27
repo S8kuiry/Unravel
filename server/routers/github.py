@@ -9,7 +9,8 @@ from crud.github import (
     get_repository_file_contents,
     get_opened_repositories,
     delete_repo_by_id,
-    get_github_repository_branches
+    get_github_repository_branches,
+    hydrate_repository
 )
 from models.github import FileContentsRequest
 import uuid
@@ -243,6 +244,47 @@ async def repository_file_contents(
             detail="Failed to fetch file contents",
         )
 
+
+@router.post("/repositories/{owner}/{repo}/hydrate")
+async def repository_hydrate(
+    owner: str,
+    repo: str,
+    branch: str = Query("main"),
+    uid: str = Depends(get_current_uid),
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        result = await hydrate_repository(
+            db=db,
+            firebase_uid=uid,
+            owner=owner,
+            repo=repo,
+            branch=branch,
+        )
+
+        if result is None:
+            raise HTTPException(
+                status_code=403,
+                detail="GitHub access is not authorized",
+            )
+
+        return {"status": "success", "data": result}
+
+    except ValueError as e:
+        raise HTTPException(status_code=403, detail=str(e))
+
+    except HTTPException:
+        raise
+
+    except Exception:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to hydrate repository",
+        )
+
+    
 
 @router.get("/opened-repositories")
 async def opened_repositories(

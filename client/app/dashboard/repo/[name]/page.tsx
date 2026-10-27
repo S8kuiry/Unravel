@@ -1,6 +1,6 @@
 "use client";
 
-import { use, useMemo, useState, useCallback } from "react";
+import { use, useMemo, useState, useCallback, useRef } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Group, Panel } from "react-resizable-panels";
 import { sans, serif } from "@/app/config/font";
@@ -10,6 +10,7 @@ import { useAuth } from "@/context/AuthContext";
 import {
     getRepositoryFileContents,
     getRepositoryFiles,
+    hydrateRepository,
 } from "@/api/github";
 import { buildFileTree, FileTreeNode } from "@/components/workspace/FileHandler";
 import FileViewer from "@/components/workspace/FileViewer";
@@ -48,7 +49,7 @@ export default function RepoWorkspacePage({
         activeFile
     );
     const [loginGit, setLoginGit] = useState(false);
-
+    const hydratedKey = useRef<string | null>(null);
 
     /* ---------- File Select Function ---------- */
 
@@ -134,7 +135,6 @@ export default function RepoWorkspacePage({
         }
     };
 
-    /* ---------- File list ---------- */
 
 
     /* ---------- File list ---------- */
@@ -170,6 +170,24 @@ export default function RepoWorkspacePage({
     const filesLoading = filesQuery.isPending;
     const filesError = filesQuery.error?.message ?? null;
     const filesExpired = isGithubTokenExpired(filesError);
+
+        /* ---------- Hydrate contents once per repo open ---------- */
+    useEffect(() => {
+        if (!filesQuery.isSuccess || !owner) return;
+        const key = `${owner}/${repoName}/${branch}`;
+        if (hydratedKey.current === key) return;
+        hydratedKey.current = key;
+
+        (async () => {
+            try {
+                const token = await getAuthToken();
+                if (!token) return;
+                await hydrateRepository(token, owner, repoName, branch);
+            } catch (err) {
+                console.error("Hydrate failed:", err);
+            }
+        })();
+    }, [filesQuery.isSuccess, owner, repoName, branch, getAuthToken]);
 
 
     /* ---------- File content ---------- */
@@ -224,6 +242,22 @@ export default function RepoWorkspacePage({
         onSuccess: async (files) => {
             // Store the freshly fetched file list.
             queryClient.setQueryData(filesKey, files);
+
+            // Re-hydrate in the background; failures are not user-facing.
+            getAuthToken()
+                .then((t) => (t ? hydrateRepository(t, owner, repoName, files.branch) : null))
+                .catch((err) => console.error("Hydrate failed:", err));
+
+            // Check if the currently open activeFile still exists in the refreshed file list
+            if (activeFile) {
+                const fileExists = files?.files?.some((f: { path: string }) => f.path === activeFile);
+                if (!fileExists) {
+                    // Clear active file from search params if it was deleted from git
+                    const params = new URLSearchParams(window.location.search);
+                    params.delete("file");
+                    window.history.replaceState(null, "", `${window.location.pathname}?${params.toString()}`);
+                }
+            }
 
             // Refetch active file-content queries only after the
             // refreshed file list has arrived.

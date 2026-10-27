@@ -176,6 +176,31 @@ export async function getRepositoryFileContents(
 
 
 /**
+ * Fill file contents in the DB with one tarball download (fire and forget).
+ * Backend: POST /github/repositories/{owner}/{repo}/hydrate?branch=
+ */
+export async function hydrateRepository(
+  token: string,
+  owner: string,
+  repo: string,
+  branch: string = "main"
+): Promise<{ status: string; data: { status: string; stored: number; missing: number | null } }> {
+  const url = `${API_BASE_URL}/github/repositories/${encodeURIComponent(
+    owner
+  )}/${encodeURIComponent(repo)}/hydrate?branch=${encodeURIComponent(branch)}`;
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}` },
+  });
+
+  if (!res.ok) {
+    await handleApiError(res, "Failed to hydrate repository.");
+  }
+
+  return res.json();
+}
+
+/**
  * Fetch last-opened repositories for the sidebar / last-opened section.
  * Backend: GET /github/opened-repositories
  * Always returns non-null last_opened_at (backend backfills from created_at).

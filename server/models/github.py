@@ -40,6 +40,7 @@ class Repository(Base):
     last_opened_at = Column(DateTime(timezone=True), nullable=True, default=_utcnow)  # sidebar list / last-opened section — always stamped on open
     created_at = Column(DateTime(timezone=True), default=_utcnow)
 
+
     # Relationships
     files = relationship("RepoFile", cascade="all, delete-orphan", passive_deletes=True)
     blobs = relationship("RepoBlob", cascade="all, delete-orphan", passive_deletes=True)
@@ -100,9 +101,12 @@ class RepoSyncState(Base):
         primary_key=True,
     )
     branch = Column(String, primary_key=True)
+    
 
     last_synced_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
     tree_truncated = Column(Boolean, nullable=False, default=False)
+    tarball_ok = Column(Boolean, nullable=True)  # set by /files, read by /hydrate
+
 
 
 

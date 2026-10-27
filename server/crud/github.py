@@ -2,8 +2,8 @@ from typing import Optional
 import httpx
 import uuid
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.future import select
-from sqlalchemy import delete
+# from sqlalchemy.future import select
+from sqlalchemy import select, delete, or_
 from sqlalchemy.dialects.postgresql import insert
 import asyncio
 from urllib.parse import quote
@@ -11,8 +11,9 @@ from models.user import User
 from models.github import Repository, RepoFile, RepoBlob, _utcnow,RepoSyncState
 from security.crypto import decrypt_token
 from datetime import timedelta
+from .repo_tarball import fetch_tarball_contents  
 
-SYNC_TTL = timedelta(minutes=10)  # how long a synced file list counts as fresh
+SYNC_TTL = timedelta(minutes=20)  # how long a synced file list counts as fresh
 
 
 GITHUB_API_URL = "https://api.github.com"
@@ -326,6 +327,10 @@ async def read_cached_files(db: AsyncSession, repo_id, branch: str):
         "files": [{"path": p, "size": s or 0} for p, s in result.all()],
     }
 
+
+TARBALL_MAX_RAW_BYTES = 10 * 1024 * 1024  # raw tree size, ignored folders included
+TARBALL_MAX_FILES = 1000                  # files that pass is_necessary_file
+
 async def get_repository_files(
     db: AsyncSession,
     firebase_uid: str,
@@ -378,8 +383,23 @@ async def get_repository_files(
         for i in tree_items
         if is_necessary_file(i)
     ]
+        # --- safe-limit check: decides whether a tarball download is allowed ---
+    raw_bytes = sum(
+        i.get("size", 0) for i in tree_items if i["type"] == "blob"
+    )
 
-        # --- remember old shas (used for ghost cleanup now, change detection later) ---
+    # tarball fetch part where small repos are fetched  all at once including file contents
+    tarball_ok = (
+        not data.get("truncated", False)
+        and raw_bytes <= TARBALL_MAX_RAW_BYTES
+        and len(filtered_files) <= TARBALL_MAX_FILES
+    )
+    print(
+        f"Tarball check: raw={raw_bytes / 1024 / 1024:.2f} MB, "
+        f"files={len(filtered_files)}, tarball_ok={tarball_ok}"
+    )
+
+    # --- remember old shas (used for ghost cleanup now, change detection later) ---
     old_result = await db.execute(
         select(RepoFile.path, RepoFile.sha).where(
             RepoFile.repo_id == db_repo.id,
@@ -442,12 +462,16 @@ async def get_repository_files(
         await db.execute(upsert_stmt)
         await db.commit()
         print("Successfully committed files in bulk!")
+
+
+   
     
     sync_stmt = insert(RepoSyncState).values(
         repo_id=db_repo.id,
         branch=branch,
         last_synced_at=_utcnow(),
         tree_truncated=data.get("truncated", False),
+        tarball_ok=tarball_ok,
     )
     await db.execute(
         sync_stmt.on_conflict_do_update(
@@ -455,6 +479,7 @@ async def get_repository_files(
             set_={
                 "last_synced_at": sync_stmt.excluded.last_synced_at,
                 "tree_truncated": sync_stmt.excluded.tree_truncated,
+                "tarball_ok": sync_stmt.excluded.tarball_ok,
             },
         )
     )
@@ -577,6 +602,124 @@ async def get_repository_file_contents(
 
         return await asyncio.gather(*(fetch_single_file(p) for p in paths))
 
+
+async def hydrate_repository(
+    db: AsyncSession,
+    firebase_uid: str,
+    owner: str,
+    repo: str,
+    branch: str = "main",
+):
+    """Fill repo_blobs from one tarball for files whose content is missing."""
+    token = await get_github_token(db, firebase_uid)
+    if not token:
+        return None
+
+    result = await db.execute(
+        select(Repository).where(
+            Repository.user_uid == firebase_uid,
+            Repository.owner == owner,
+            Repository.name == repo,
+        )
+    )
+    db_repo = result.scalars().first()
+    if not db_repo:
+        raise ValueError("Repository not found in database")
+    repo_id = db_repo.id
+
+    sync = await db.get(RepoSyncState, (repo_id, branch))
+    if not sync or not sync.tarball_ok:
+        return {"status": "skipped", "stored": 0, "missing": None}
+
+    file_rows = await db.execute(
+        select(RepoFile.path, RepoFile.sha).where(
+            RepoFile.repo_id == repo_id,
+            RepoFile.branch == branch,
+        )
+    )
+    files = {p: s for p, s in file_rows.all()}
+
+    blob_rows = await db.execute(
+        select(RepoBlob.path, RepoBlob.sha).where(
+            RepoBlob.repo_id == repo_id,
+            or_(
+                RepoBlob.content.is_not(None),
+                RepoBlob.is_binary.is_(True),
+            ),
+        )
+    )
+    have = {p: s for p, s in blob_rows.all()}
+
+    wanted = {p: s for p, s in files.items() if have.get(p) != s}
+    if not wanted:
+        return {"status": "complete", "stored": 0, "missing": 0}
+
+    async with make_client() as client:
+        fetched ,binary = await fetch_tarball_contents(
+            client, github_headers(token), GITHUB_API_URL,
+            owner, repo, branch, wanted,
+        )
+    print(f"Hydrate: stored {len(fetched)} of {len(wanted)} needed files")
+
+    items = list(fetched.items())
+    for i in range(0, len(items), 50):
+        batch = [
+            {
+                "repo_id": repo_id,
+                "path": p,
+                "sha": wanted[p],
+                "content": text,
+                "is_binary": False,
+                "fetched_at": _utcnow(),
+            }
+            for p, text in items[i:i + 50]
+        ]
+        ins = insert(RepoBlob).values(batch)
+        await db.execute(
+            ins.on_conflict_do_update(
+                index_elements=["repo_id", "path"],
+                set_={
+                    "sha": ins.excluded.sha,
+                    "content": ins.excluded.content,
+                    "is_binary": ins.excluded.is_binary,
+                    "fetched_at": ins.excluded.fetched_at,
+                },
+            )
+        )
+        await db.commit()
+
+    if binary:
+        bin_rows = [
+            {
+                "repo_id": repo_id,
+                "path": p,
+                "sha": wanted[p],
+                "content": None,
+                "is_binary": True,
+                "fetched_at": _utcnow(),
+            }
+            for p in binary
+        ]
+        ins = insert(RepoBlob).values(bin_rows)
+        await db.execute(
+            ins.on_conflict_do_update(
+                index_elements=["repo_id", "path"],
+                set_={
+                    "sha": ins.excluded.sha,
+                    "content": ins.excluded.content,
+                    "is_binary": ins.excluded.is_binary,
+                    "fetched_at": ins.excluded.fetched_at,
+                },
+            )
+        )
+        await db.commit()
+
+    missing = len(wanted) - len(fetched) - len(binary)
+    return {
+        "status": "complete" if missing == 0 else "partial",
+        "stored": len(fetched),
+        "missing": missing,
+    }
 
 
 async def get_opened_repositories(
