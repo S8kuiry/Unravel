@@ -12,6 +12,7 @@ from models.github import Repository, RepoFile, RepoBlob, _utcnow,RepoSyncState
 from security.crypto import decrypt_token
 from datetime import timedelta
 from .repo_tarball import fetch_tarball_contents  
+from services.indexing_service import enqueue_fetched_files_for_indexing
 
 SYNC_TTL = timedelta(minutes=20)  # how long a synced file list counts as fresh
 
@@ -713,6 +714,17 @@ async def hydrate_repository(
             )
         )
         await db.commit()
+
+    # ==========================================
+    # STEP 4: Enqueue the newly fetched files for indexing
+    # ==========================================
+    indexing_result = await enqueue_fetched_files_for_indexing(
+        db=db,
+        repo_id=repo_id,
+        branch=branch,
+    )
+    await db.commit()
+    print(f"Indexing queue: {indexing_result}")
 
     missing = len(wanted) - len(fetched) - len(binary)
     return {

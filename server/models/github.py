@@ -4,7 +4,8 @@ import os
 from pydantic import BaseModel
 from sqlalchemy import (
     BigInteger, Boolean, Column, DateTime, ForeignKey, Integer,
-    String, Text, UniqueConstraint,ForeignKeyConstraint, Index,text
+    String, Text, UniqueConstraint,ForeignKeyConstraint, Index,text,
+    CheckConstraint
 )
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
@@ -156,6 +157,114 @@ class RepoChunk(Base):
             postgresql_ops={"name": "gin_trgm_ops"},
         ),
     )
+
+class RepoIndexJob(Base):
+    """
+    Tracks indexing progress for one file version
+    in one repository branch.
+    """
+    __tablename__ = "repo_index_jobs"
+
+    id = Column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        server_default=text("gen_random_uuid()"),  # 👈 Database-side default
+    )
+
+    repo_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("repositories.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+
+    branch = Column(String, nullable=False)
+    path = Column(String, nullable=False)
+
+    # Identifies the exact file version being indexed
+    blob_sha = Column(String, nullable=False)
+
+    # Job lifecycle
+    status = Column(
+        String(20),
+        nullable=False,
+        server_default=text("'pending'"),  # 👈 Database-side default
+    )
+
+    # Retry tracking
+    attempts = Column(Integer, nullable=False, server_default=text("0"))
+    max_attempts = Column(Integer, nullable=False, server_default=text("5"))
+
+    # When this job becomes eligible for processing
+    available_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("CURRENT_TIMESTAMP"),  # 👈 Database-side default
+    )
+
+    # Worker lease: helps recover abandoned jobs
+    locked_by = Column(String, nullable=True)
+    lease_expires_at = Column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+
+    # Error tracking
+    last_error = Column(Text, nullable=True)
+
+    # Timestamps
+    created_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("CURRENT_TIMESTAMP"),  # 👈 Database-side default
+    )
+
+    updated_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("CURRENT_TIMESTAMP"),  # 👈 Database-side default
+        onupdate=_utcnow,
+    )
+
+    completed_at = Column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+
+    __table_args__ = (
+        # Prevent duplicate jobs for the same file version
+        UniqueConstraint(
+            "repo_id",
+            "branch",
+            "path",
+            "blob_sha",
+            name="uq_repo_index_job_file_version",
+        ),
+
+        CheckConstraint(
+            "status IN ('pending', 'processing', 'completed', 'failed', 'skipped')",
+            name="ck_repo_index_job_status",
+        ),
+
+        CheckConstraint(
+            "attempts >= 0 AND max_attempts > 0",
+            name="ck_repo_index_job_attempts",
+        ),
+
+        # Quickly find jobs waiting to be processed
+        Index(
+            "ix_repo_index_jobs_pending",
+            "available_at",
+            postgresql_where=text("status = 'pending'"),
+        ),
+
+        # Quickly find jobs whose worker lease has expired
+        Index(
+            "ix_repo_index_jobs_processing_lease",
+            "lease_expires_at",
+            postgresql_where=text("status = 'processing'"),
+        ),
+    )
+
 
 
 
