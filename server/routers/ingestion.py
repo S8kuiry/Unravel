@@ -1,10 +1,16 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Request, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from ingestion.chunker import chunk_file_content
 from db.database import get_db
 from security.auth import get_current_uid
 import uuid
 from pydantic import BaseModel
+
+from uuid import UUID
+from fastapi.responses import StreamingResponse
+from sqlalchemy import select, and_
+from models.github import Repository, RepoFile, RepoIndexJob
+from services.repository_progress import repository_index_progress_stream
 
 
 router = APIRouter(
@@ -45,3 +51,45 @@ async def chunker(payload: FileChunkRequest):
         )
 
 
+# sse endpoint
+
+
+
+@router.get("/repositories/{repo_id}/index-progress")
+async def repository_index_progress(
+    repo_id: UUID,
+    request: Request,
+    branch: str = Query(default="main"),
+    uid: str = Depends(get_current_uid),
+    db: AsyncSession = Depends(get_db),
+):
+
+    # Verify repository ownership.
+    result = await db.execute(
+        select(Repository.id).where(
+            Repository.id == repo_id,
+            Repository.user_uid == uid,
+        )
+    )
+
+    if result.scalar_one_or_none() is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Repository not found",
+        )
+
+    # Delegate SSE generation to the service.
+    return StreamingResponse(
+        repository_index_progress_stream(
+            repo_id=repo_id,
+            branch=branch,
+            request=request,
+            db=db,
+        ),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )

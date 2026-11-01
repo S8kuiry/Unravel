@@ -25,6 +25,7 @@ import { isGithubTokenExpired } from "@/lib/github-session";
 import { useExpandedFolders } from "@/lib/useExpandedFolders";
 import { OpenedRepoRow } from "@/types/github";
 import BranchSelector from "@/components/workspace/BranchSelector";
+import RepositoryIndexPage from "@/components/repositoryProgress";
 
 export default function RepoWorkspacePage({
     params,
@@ -51,6 +52,7 @@ export default function RepoWorkspacePage({
     );
     const [loginGit, setLoginGit] = useState(false);
     const hydratedKey = useRef<string | null>(null);
+    
 
     /* ---------- File Select Function ---------- */
 
@@ -171,8 +173,18 @@ export default function RepoWorkspacePage({
     const filesLoading = filesQuery.isPending;
     const filesError = filesQuery.error?.message ?? null;
     const filesExpired = isGithubTokenExpired(filesError);
+     const openedRepos = queryClient.getQueryData<OpenedRepoRow[]>([
+    "opened-repos",
+    user?.uid,
+  ]);
 
-        /* ---------- Hydrate contents once per repo open ---------- */
+  const repository = openedRepos?.find(
+    (repo) => repo.owner === owner && repo.name === repoName
+  );
+
+  const repositoryId = repository?.id;
+
+    /* ---------- Hydrate contents once per repo open ---------- */
     useEffect(() => {
         if (!filesQuery.isSuccess || !owner) return;
         const key = `${owner}/${repoName}/${branch}`;
@@ -359,7 +371,7 @@ export default function RepoWorkspacePage({
     return (
         <div className={`flex h-[calc(100dvh-3.0rem)] min-h-[560px] w-full flex-col ${sans.className}`}>
 
-       
+
 
             {/* Header */}
             <div className="flex items-center justify-between pb-4 shrink-0">
@@ -393,8 +405,11 @@ export default function RepoWorkspacePage({
 
                 <div className="flex items-center gap-2">
                     <span className="rounded-md border border-[#2B2723] bg-[#181614] px-2.5 py-1 text-xs font-medium text-[#F5A524]">
-                        Indexed
-                    </span>
+                        <RepositoryIndexPage
+                            repoId={repositoryId!!}
+                            branch={currentBranch}
+                        />               
+                             </span>
                 </div>
             </div>
 
@@ -421,172 +436,172 @@ export default function RepoWorkspacePage({
                 ) : (
                     <Group orientation="horizontal">
 
-                    {/* LEFT PANEL: Codebase Explorer & File Content */}
-                    <Panel id="codebase-view" defaultSize={65} minSize={35}>
-                        <Card
-                            title={"Codebase - " + `${fileLabel}`}
-                            // meta={fileLabel}
-                            action={
-                                <div className="flex items-center gap-3">
-                                    <span className="text-xs text-[#A39B90]">Read-only mode</span>
-                                    <button
-                                        onClick={() => refreshMutation.mutate()}
-                                        disabled={refreshMutation.isPending}
-                                        className="cursor-pointer flex items-center gap-1.5 rounded-lg border border-[#2B2723] bg-[#0E0D0C] px-2.5 py-2 text-xs font-medium text-[#ECE7DF] transition-colors hover:border-[#F5A524] hover:text-[#F5A524] focus:outline-none disabled:cursor-not-allowed disabled:opacity-60"
-                                        title="Refresh files"
-                                    >
-                                        <RefreshCw className={`h-3 w-3 ${refreshMutation.isPending ? "animate-spin" : ""}`} />
-                                    </button>
-                                    <button
-                                        onClick={handleCopyCode}
-                                        className="cursor-pointer flex items-center gap-1.5 rounded-md border border-[#2B2723] bg-[#0E0D0C] px-2.5 py-1 text-xs font-medium text-[#ECE7DF] transition-colors hover:border-[#F5A524] hover:text-[#F5A524] focus:outline-none"
-                                        title="Copy file contents"
-                                    >
-                                        {copied ? (
-                                            <>
-                                                <Check className="h-3 w-3 text-emerald-400" />
-                                                <span className="text-emerald-400 text-xs">Copied</span>
-                                            </>
-                                        ) : (
-                                            <>
-                                                <Copy className="h-3 w-3" />
-                                                <span className="text-xs">Copy</span>
-                                            </>
-                                        )}
-                                    </button>
-                                </div>
-                            }
-                        >
-                            <div className="flex h-full min-h-0">
-                                {/* File Tree */}
-                                <div
-                                    className="shrink-0 border-r border-[#2B2723] bg-[#141210] p-2 overflow-auto"
-                                    style={{ width: fileTreeWidth }}
-                                >
-                                    <div className="mb-2 px-2 text-[10px] font-semibold uppercase tracking-wider text-[#6F675D]">
-                                        Files
-                                    </div>
-                                    {filesLoading && (
-                                        <p className="px-3 py-4 text-xs text-[#6F675D]">Loading files…</p>
-                                    )}
-                                    {!filesLoading && filesError && !filesExpired && (
-                                        <div className="px-3 py-2 text-[10px] text-red-400">
-                                            <p>{filesError}</p>
-                                            <button
-                                                onClick={() => void filesQuery.refetch()}
-                                                disabled={filesQuery.isFetching}
-                                                className="mt-2  cursor-pointer rounded-md border border-[#2B2723] px-2 py-1.5 text-[#ECE7DF] hover:border-[#F5A524] disabled:cursor-not-allowed disabled:opacity-60"
-                                            >
-                                                {filesQuery.isFetching ? "Retrying…" : "Retry"}
-                                            </button>
-                                        </div>
-                                    )}
-                                    {!filesLoading && !filesError && files.length === 0 && (
-                                        <p className="px-3 py-4 text-xs text-[#6F675D]">No files found.</p>
-                                    )}
-                                    {!filesLoading && !filesError && fileTree.map((node) => (
-                                        <FileTreeNode
-                                            key={node.path}
-                                            node={node}
-                                            activeFile={activeFile}
-                                            onSelectFile={handleSelectFile}
-                                            expanded={expanded}
-                                            onToggleFolder={toggleFolder}
-                                        />
-                                    ))}
-                                </div>
-
-                                <div
-                                    role="separator"
-                                    aria-label="Resize file explorer"
-                                    aria-orientation="vertical"
-                                    tabIndex={0}
-                                    className="w-1 shrink-0 cursor-col-resize touch-none bg-[#141210]  transition-colors hover:bg-[#F5A524] active:bg-[#F5A524]"
-                                    onPointerDown={(event) => {
-                                        fileTreeResizeStart.current = {
-                                            pointerId: event.pointerId,
-                                            startX: event.clientX,
-                                            startWidth: fileTreeWidth,
-                                        };
-                                        event.currentTarget.setPointerCapture(event.pointerId);
-                                    }}
-                                    onPointerMove={(event) => {
-                                        const start = fileTreeResizeStart.current;
-                                        if (!start || start.pointerId !== event.pointerId) return;
-                                        setFileTreeWidth(Math.min(420, Math.max(160, start.startWidth + event.clientX - start.startX)));
-                                    }}
-                                    onPointerUp={() => {
-                                        fileTreeResizeStart.current = null;
-                                    }}
-                                    onPointerCancel={() => {
-                                        fileTreeResizeStart.current = null;
-                                    }}
-                                    onKeyDown={(event) => {
-                                        if (event.key === "ArrowLeft") setFileTreeWidth((width) => Math.max(160, width - 16));
-                                        if (event.key === "ArrowRight") setFileTreeWidth((width) => Math.min(420, width + 16));
-                                    }}
-                                />
-
-                                {/* File Viewer with Sticky/Header Copy Action */}
-                                <FileViewer
-                                    activeFile={activeFile}
-                                    contentLoading={contentLoading}
-                                    contentError={contentError}
-                                    fileContent={fileContent}
-                                />
-                            </div>
-                        </Card>
-                    </Panel>
-
-                    {/* Resizable Divider using your custom Handle component */}
-                    <Handle direction="horizontal" />
-
-                    {/* RIGHT PANEL: AI Assistant Chat */}
-                    <Panel id="ai-chat" defaultSize={35} minSize={25}>
-                        <Card
-                            title="Unravel Assistant"
-                            meta="Agentic Chat"
-                            action={<Sparkles className="h-4 w-4 text-[#F5A524]" />}
-                        >
-                            <div className="flex h-full flex-col justify-between p-4">
-
-                                {/* Message Log */}
-                                <div className="space-y-4 overflow-y-auto">
-                                    <div className="flex gap-3 text-xs leading-relaxed">
-                                        <div className="grid h-6 w-6 shrink-0 place-items-center rounded bg-[#F5A524] font-bold text-[#1A1206]">
-                                            AI
-                                        </div>
-                                        <div className="rounded-lg border border-[#2B2723] bg-[#211E1B]/60 p-3 text-[#ECE7DF]">
-                                            <p>
-                                                I have indexed <span className="font-semibold">{repoName}</span>. Ask me questions about repository files, structure, or code logic.
-                                            </p>
-                                        </div>
-                                    </div>
-                                </div>
-
-                                {/* Input Controls */}
-                                <div className="mt-4 pt-3 border-t border-[#2B2723]">
-                                    <div className="relative flex items-end rounded-xl border border-[#2B2723] bg-[#0E0D0C] p-2 focus-within:border-[#F5A524] focus-within:ring-1 focus-within:ring-[#F5A524]">
-                                        <textarea
-                                            value={chatInput}
-                                            onChange={(e) => setChatInput(e.target.value)}
-                                            placeholder="Ask about this codebase..."
-                                            className="max-h-32 min-h-[40px] w-full resize-none bg-transparent px-2 py-1 text-xs text-[#ECE7DF] outline-none placeholder:text-[#6F675D]"
-                                            rows={1}
-                                        />
-                                        <button className="mb-0.5 ml-2 grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-[#F5A524] text-[#1A1206] transition-colors hover:bg-[#FBBF4D]">
-                                            <Send className="h-3.5 w-3.5" />
+                        {/* LEFT PANEL: Codebase Explorer & File Content */}
+                        <Panel id="codebase-view" defaultSize={65} minSize={35}>
+                            <Card
+                                title={"Codebase - " + `${fileLabel}`}
+                                // meta={fileLabel}
+                                action={
+                                    <div className="flex items-center gap-3">
+                                        <span className="text-xs text-[#A39B90]">Read-only mode</span>
+                                        <button
+                                            onClick={() => refreshMutation.mutate()}
+                                            disabled={refreshMutation.isPending}
+                                            className="cursor-pointer flex items-center gap-1.5 rounded-lg border border-[#2B2723] bg-[#0E0D0C] px-2.5 py-2 text-xs font-medium text-[#ECE7DF] transition-colors hover:border-[#F5A524] hover:text-[#F5A524] focus:outline-none disabled:cursor-not-allowed disabled:opacity-60"
+                                            title="Refresh files"
+                                        >
+                                            <RefreshCw className={`h-3 w-3 ${refreshMutation.isPending ? "animate-spin" : ""}`} />
+                                        </button>
+                                        <button
+                                            onClick={handleCopyCode}
+                                            className="cursor-pointer flex items-center gap-1.5 rounded-md border border-[#2B2723] bg-[#0E0D0C] px-2.5 py-1 text-xs font-medium text-[#ECE7DF] transition-colors hover:border-[#F5A524] hover:text-[#F5A524] focus:outline-none"
+                                            title="Copy file contents"
+                                        >
+                                            {copied ? (
+                                                <>
+                                                    <Check className="h-3 w-3 text-emerald-400" />
+                                                    <span className="text-emerald-400 text-xs">Copied</span>
+                                                </>
+                                            ) : (
+                                                <>
+                                                    <Copy className="h-3 w-3" />
+                                                    <span className="text-xs">Copy</span>
+                                                </>
+                                            )}
                                         </button>
                                     </div>
-                                </div>
+                                }
+                            >
+                                <div className="flex h-full min-h-0">
+                                    {/* File Tree */}
+                                    <div
+                                        className="shrink-0 border-r border-[#2B2723] bg-[#141210] p-2 overflow-auto"
+                                        style={{ width: fileTreeWidth }}
+                                    >
+                                        <div className="mb-2 px-2 text-[10px] font-semibold uppercase tracking-wider text-[#6F675D]">
+                                            Files
+                                        </div>
+                                        {filesLoading && (
+                                            <p className="px-3 py-4 text-xs text-[#6F675D]">Loading files…</p>
+                                        )}
+                                        {!filesLoading && filesError && !filesExpired && (
+                                            <div className="px-3 py-2 text-[10px] text-red-400">
+                                                <p>{filesError}</p>
+                                                <button
+                                                    onClick={() => void filesQuery.refetch()}
+                                                    disabled={filesQuery.isFetching}
+                                                    className="mt-2  cursor-pointer rounded-md border border-[#2B2723] px-2 py-1.5 text-[#ECE7DF] hover:border-[#F5A524] disabled:cursor-not-allowed disabled:opacity-60"
+                                                >
+                                                    {filesQuery.isFetching ? "Retrying…" : "Retry"}
+                                                </button>
+                                            </div>
+                                        )}
+                                        {!filesLoading && !filesError && files.length === 0 && (
+                                            <p className="px-3 py-4 text-xs text-[#6F675D]">No files found.</p>
+                                        )}
+                                        {!filesLoading && !filesError && fileTree.map((node) => (
+                                            <FileTreeNode
+                                                key={node.path}
+                                                node={node}
+                                                activeFile={activeFile}
+                                                onSelectFile={handleSelectFile}
+                                                expanded={expanded}
+                                                onToggleFolder={toggleFolder}
+                                            />
+                                        ))}
+                                    </div>
 
-                            </div>
-                        </Card>
-                    </Panel>
+                                    <div
+                                        role="separator"
+                                        aria-label="Resize file explorer"
+                                        aria-orientation="vertical"
+                                        tabIndex={0}
+                                        className="w-1 shrink-0 cursor-col-resize touch-none bg-[#141210]  transition-colors hover:bg-[#F5A524] active:bg-[#F5A524]"
+                                        onPointerDown={(event) => {
+                                            fileTreeResizeStart.current = {
+                                                pointerId: event.pointerId,
+                                                startX: event.clientX,
+                                                startWidth: fileTreeWidth,
+                                            };
+                                            event.currentTarget.setPointerCapture(event.pointerId);
+                                        }}
+                                        onPointerMove={(event) => {
+                                            const start = fileTreeResizeStart.current;
+                                            if (!start || start.pointerId !== event.pointerId) return;
+                                            setFileTreeWidth(Math.min(420, Math.max(160, start.startWidth + event.clientX - start.startX)));
+                                        }}
+                                        onPointerUp={() => {
+                                            fileTreeResizeStart.current = null;
+                                        }}
+                                        onPointerCancel={() => {
+                                            fileTreeResizeStart.current = null;
+                                        }}
+                                        onKeyDown={(event) => {
+                                            if (event.key === "ArrowLeft") setFileTreeWidth((width) => Math.max(160, width - 16));
+                                            if (event.key === "ArrowRight") setFileTreeWidth((width) => Math.min(420, width + 16));
+                                        }}
+                                    />
+
+                                    {/* File Viewer with Sticky/Header Copy Action */}
+                                    <FileViewer
+                                        activeFile={activeFile}
+                                        contentLoading={contentLoading}
+                                        contentError={contentError}
+                                        fileContent={fileContent}
+                                    />
+                                </div>
+                            </Card>
+                        </Panel>
+
+                        {/* Resizable Divider using your custom Handle component */}
+                        <Handle direction="horizontal" />
+
+                        {/* RIGHT PANEL: AI Assistant Chat */}
+                        <Panel id="ai-chat" defaultSize={35} minSize={25}>
+                            <Card
+                                title="Unravel Assistant"
+                                meta="Agentic Chat"
+                                action={<Sparkles className="h-4 w-4 text-[#F5A524]" />}
+                            >
+                                <div className="flex h-full flex-col justify-between p-4">
+
+                                    {/* Message Log */}
+                                    <div className="space-y-4 overflow-y-auto">
+                                        <div className="flex gap-3 text-xs leading-relaxed">
+                                            <div className="grid h-6 w-6 shrink-0 place-items-center rounded bg-[#F5A524] font-bold text-[#1A1206]">
+                                                AI
+                                            </div>
+                                            <div className="rounded-lg border border-[#2B2723] bg-[#211E1B]/60 p-3 text-[#ECE7DF]">
+                                                <p>
+                                                    I have indexed <span className="font-semibold">{repoName}</span>. Ask me questions about repository files, structure, or code logic.
+                                                </p>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    {/* Input Controls */}
+                                    <div className="mt-4 pt-3 border-t border-[#2B2723]">
+                                        <div className="relative flex items-end rounded-xl border border-[#2B2723] bg-[#0E0D0C] p-2 focus-within:border-[#F5A524] focus-within:ring-1 focus-within:ring-[#F5A524]">
+                                            <textarea
+                                                value={chatInput}
+                                                onChange={(e) => setChatInput(e.target.value)}
+                                                placeholder="Ask about this codebase..."
+                                                className="max-h-32 min-h-[40px] w-full resize-none bg-transparent px-2 py-1 text-xs text-[#ECE7DF] outline-none placeholder:text-[#6F675D]"
+                                                rows={1}
+                                            />
+                                            <button className="mb-0.5 ml-2 grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-[#F5A524] text-[#1A1206] transition-colors hover:bg-[#FBBF4D]">
+                                                <Send className="h-3.5 w-3.5" />
+                                            </button>
+                                        </div>
+                                    </div>
+
+                                </div>
+                            </Card>
+                        </Panel>
 
                     </Group>
                 )
-            }
+                }
             </div>
 
         </div>

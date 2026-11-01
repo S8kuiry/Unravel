@@ -111,7 +111,7 @@ class RepoSyncState(Base):
 
 
 
-EMBED_DIM = int(os.getenv("EMBED_DIM", "768"))
+EMBEDDING_DIM = int(os.getenv("EMBEDDING_DIM", "768"))
 
 class RepoChunk(Base):
     """Chunks of one file on one branch. Embedding is filled in later."""
@@ -131,7 +131,7 @@ class RepoChunk(Base):
     start_line = Column(Integer, nullable=False)
     end_line = Column(Integer, nullable=False)
 
-    embedding = Column(Vector(EMBED_DIM), nullable=True)  # NULL = not embedded yet
+    embedding = Column(Vector(EMBEDDING_DIM), nullable=True)  # NULL = not embedded yet
 
     __table_args__ = (
         ForeignKeyConstraint(

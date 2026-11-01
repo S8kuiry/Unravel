@@ -91,6 +91,10 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
         router.replace("/dashboard");
       }
       // 2. Clean up cache and state safely after initiating navigation
+      queryClient.setQueryData<OpenedRepoRow[]>(
+        ["opened-repos", user?.uid],
+        (old) => (old ? old.filter((r) => r.id !== repoToDelete?.id) : old)
+      );
       queryClient.invalidateQueries({ queryKey: ["opened-repos", user?.uid] });
       queryClient.removeQueries({ queryKey: ["repo-files", repoToDelete?.owner, repoToDelete?.name] });
       queryClient.removeQueries({ queryKey: ["repo-content", repoToDelete?.owner, repoToDelete?.name] });

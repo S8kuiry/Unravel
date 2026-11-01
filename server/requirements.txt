@@ -19,4 +19,8 @@ requests>=2.31.0
 cryptography>=42.0.0
 firebase-admin>=6.5.0
 
-# --- Code parsing and chunking ---
+# --- Background Jobs & Workflow Orchestration ---
+inngest>=0.4.0
+
+# --- AI & LLM SDK ---
+google-genai>=0.1.0

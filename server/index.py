@@ -3,13 +3,16 @@
 import os
 from dotenv import load_dotenv
 load_dotenv()
-
 from fastapi import FastAPI, Depends
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
 from routers.user import router as user_router
 from routers.github import router as github_router
 from routers.ingestion import router as ingestion_router
+#inngest imports
+import inngest.fast_api
+from inngest_worker.inngest_client import inngest_client
+from inngest_worker.indexing import index_repository_files
 
 app = FastAPI(
     title="Unravel API",
@@ -34,6 +37,13 @@ app.include_router(ingestion_router)
 
 
 
+
+#Register Inngest with FastAPI
+inngest.fast_api.serve(
+    app,
+    inngest_client,
+    [index_repository_files],
+)
 
 #health check endpoint
 @app.get("/")

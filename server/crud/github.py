@@ -13,6 +13,7 @@ from security.crypto import decrypt_token
 from datetime import timedelta
 from .repo_tarball import fetch_tarball_contents  
 from services.indexing_service import enqueue_fetched_files_for_indexing
+from inngest_worker.inngest_client import send_indexing_event
 
 SYNC_TTL = timedelta(minutes=20)  # how long a synced file list counts as fresh
 
@@ -715,7 +716,7 @@ async def hydrate_repository(
         )
         await db.commit()
 
-    # ==========================================
+   # ==========================================
     # STEP 4: Enqueue the newly fetched files for indexing
     # ==========================================
     indexing_result = await enqueue_fetched_files_for_indexing(
@@ -724,6 +725,14 @@ async def hydrate_repository(
         branch=branch,
     )
     await db.commit()
+    
+    # Fixed: Use indexing_result instead of the reused database 'result' object
+    if indexing_result.get("created", 0) > 0:
+        await send_indexing_event(
+            repo_id=repo_id,
+            branch=branch,
+        )
+        
     print(f"Indexing queue: {indexing_result}")
 
     missing = len(wanted) - len(fetched) - len(binary)
