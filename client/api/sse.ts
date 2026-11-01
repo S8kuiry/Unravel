@@ -49,7 +49,7 @@ export async function streamRepositoryIndexProgress(
   callbacks: RepositoryProgressCallbacks = {},
   signal?: AbortSignal
 ): Promise<void> {
-  const url = `${API_BASE_URL}/repositories/${encodeURIComponent(
+  const url = `${API_BASE_URL}/ingestion/repositories/${encodeURIComponent(
     repoId
   )}/index-progress?branch=${encodeURIComponent(branch)}`;
 

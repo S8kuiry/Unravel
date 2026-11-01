@@ -28,11 +28,11 @@ async def repository_index_progress_stream(
         # 1. Fetch files and their matching current-SHA jobs.
         result = await db.execute(
             select(
-                RepoFile.path,
+                RepoIndexJob.path,
                 RepoIndexJob.status,
             )
-            .outerjoin(
-                RepoIndexJob,
+            .join(
+                RepoFile,
                 and_(
                     RepoIndexJob.repo_id == RepoFile.repo_id,
                     RepoIndexJob.branch == RepoFile.branch,
@@ -41,8 +41,8 @@ async def repository_index_progress_stream(
                 ),
             )
             .where(
-                RepoFile.repo_id == repo_id,
-                RepoFile.branch == branch,
+                RepoIndexJob.repo_id == repo_id,
+                RepoIndexJob.branch == branch,
             )
         )
 

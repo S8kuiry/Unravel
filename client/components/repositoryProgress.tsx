@@ -8,7 +8,7 @@ import {
 } from "@/api/sse";
 
 interface RepositoryIndexPageProps {
-  repoId: string;
+  repoId?: string;
   branch: string;
 }
 
@@ -23,7 +23,10 @@ export default function RepositoryIndexPage({
   const [activeFile, setActiveFile] = useState("");
 
   useEffect(() => {
-    if (!repoId) return;
+    if (!repoId) {
+      setStatus("Waiting for repository...");
+      return;
+    }
 
     const controller = new AbortController();
 

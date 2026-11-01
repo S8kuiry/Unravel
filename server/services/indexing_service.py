@@ -61,9 +61,10 @@ async def enqueue_fetched_files_for_indexing(
     )
 
     result = await db.execute(stmt)
-
-    created_job_ids = result.scalars().all()
+    # RETURNING includes only rows actually inserted; conflicts are skipped.
+    # AsyncSession may return a ChunkedIteratorResult, which has no rowcount.
+    created = len(result.scalars().all())
 
     return {
-        "created": len(created_job_ids),
+        "created": created,
     }

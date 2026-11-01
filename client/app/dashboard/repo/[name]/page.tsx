@@ -10,6 +10,7 @@ import { useAuth } from "@/context/AuthContext";
 import {
     getRepositoryFileContents,
     getRepositoryFiles,
+    getOpenedRepositories,
     hydrateRepository,
 } from "@/api/github";
 import { buildFileTree, FileTreeNode } from "@/components/workspace/FileHandler";
@@ -173,12 +174,18 @@ export default function RepoWorkspacePage({
     const filesLoading = filesQuery.isPending;
     const filesError = filesQuery.error?.message ?? null;
     const filesExpired = isGithubTokenExpired(filesError);
-     const openedRepos = queryClient.getQueryData<OpenedRepoRow[]>([
-    "opened-repos",
-    user?.uid,
-  ]);
+    const openedReposQuery = useQuery({
+        queryKey: ["opened-repos", user?.uid],
+        enabled: Boolean(user),
+        queryFn: async () => {
+            const token = await getAuthToken();
+            if (!token) throw new Error("You are not authenticated.");
+            const response = await getOpenedRepositories(token);
+            return (response.data ?? []) as OpenedRepoRow[];
+        },
+    });
 
-  const repository = openedRepos?.find(
+    const repository = openedReposQuery.data?.find(
     (repo) => repo.owner === owner && repo.name === repoName
   );
 
@@ -406,7 +413,7 @@ export default function RepoWorkspacePage({
                 <div className="flex items-center gap-2">
                     <span className="rounded-md border border-[#2B2723] bg-[#181614] px-2.5 py-1 text-xs font-medium text-[#F5A524]">
                         <RepositoryIndexPage
-                            repoId={repositoryId!!}
+                            repoId={repositoryId}
                             branch={currentBranch}
                         />               
                              </span>

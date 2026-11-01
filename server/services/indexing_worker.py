@@ -121,20 +121,21 @@ async def claim_index_jobs():
                 )
             )
 
-            job = result.scalar_one_or_none()
+            jobs = result.scalars().all()
 
-            if not job:
+            if not jobs:
                 return worker_id, []
 
-            job.status = "processing"
-            job.attempts += 1
-            job.locked_by = worker_id
-            job.lease_expires_at = (
-                now + timedelta(minutes=LEASE_MINUTES)
-            )
-            job.last_error = None
+            for job in jobs:
+                job.status = "processing"
+                job.attempts += 1
+                job.locked_by = worker_id
+                job.lease_expires_at = (
+                    now + timedelta(minutes=LEASE_MINUTES)
+                )
+                job.last_error = None
 
-            return worker_id, [job.id]
+            return worker_id, [job.id for job in jobs]
 
 
 # ---------------------------------------------------------
@@ -772,9 +773,11 @@ async def process_index_batch():
             "completed": 0,
         }
 
+    logger.info("Claimed %s indexing job(s)", len(job_ids))
+
     results = await asyncio.gather(
         *[
-            process_index_job(worker_id, job_id)
+            process_index_job(job_id, worker_id)
             for job_id in job_ids
         ],
         return_exceptions=True,
