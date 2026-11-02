@@ -37,6 +37,23 @@ def utc_now():
     return datetime.now(timezone.utc)
 
 
+def build_search_vector(name, content):
+    name_vector = func.setweight(
+        func.to_tsvector(
+            "english",
+            func.coalesce(name, ""),
+        ),
+        "A",
+    )
+
+    content_vector = func.setweight(
+        func.to_tsvector("english", content),
+        "B",
+    )
+
+    return name_vector.op("||")(content_vector)
+
+
 # ---------------------------------------------------------
 # 1. CLAIM ONE JOB
 # ---------------------------------------------------------
@@ -408,6 +425,8 @@ async def prepare_repo_chunks(
             )
 
             for chunk in chunks:
+                chunk_name = chunk.get("name")
+                chunk_content = chunk["content"]
                 db.add(
                     RepoChunk(
                         repo_id=repo_id,
@@ -419,6 +438,10 @@ async def prepare_repo_chunks(
                         content=chunk["content"],
                         start_line=chunk["start_line"],
                         end_line=chunk["end_line"],
+                        search_vector=build_search_vector(
+                        chunk_name,
+                        chunk_content,
+            ),
                         embedding=None,
                     )
                 )

@@ -7,7 +7,7 @@ from sqlalchemy import (
     String, Text, UniqueConstraint,ForeignKeyConstraint, Index,text,
     CheckConstraint
 )
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import TSVECTOR, UUID
 from sqlalchemy.orm import relationship
 from pgvector.sqlalchemy import Vector
 from dotenv import load_dotenv
@@ -128,6 +128,7 @@ class RepoChunk(Base):
     chunk_index = Column(Integer, primary_key=True)
     blob_sha = Column(String, nullable=False)  # RepoFile.sha these chunks were cut from
     content = Column(Text, nullable=False)
+    search_vector = Column(TSVECTOR, nullable=True)
     start_line = Column(Integer, nullable=False)
     end_line = Column(Integer, nullable=False)
 
@@ -156,6 +157,12 @@ class RepoChunk(Base):
             postgresql_using="gin",
             postgresql_ops={"name": "gin_trgm_ops"},
         ),
+
+        Index(
+        "ix_chunks_search_vector",
+        "search_vector",
+        postgresql_using="gin",
+)
     )
 
 class RepoIndexJob(Base):
