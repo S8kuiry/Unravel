@@ -1,11 +1,11 @@
 "use client";
 
-import { useMemo, useState, useEffect } from "react";
+import { useMemo, useState } from "react";
 import { ChevronLeft, ChevronRight, RefreshCw, Search } from "lucide-react";
 import { Repo, RepoRow } from "./RepoRow";
 import { Card } from "../Panel";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "@/context/AuthContext";
 import { OpenedRepoRow } from "@/types/github";
 
@@ -24,27 +24,21 @@ export default function RepoList({ repos, refreshing, currentPage, hasNextPage }
   const pathname = usePathname();
   const searchParams = useSearchParams();
 
-  // Inside RepoList:
   const queryClient = useQueryClient();
 
   // Reactively read the opened-repos cache without triggering extra fetches.
-  const readOpened = () =>
-    new Set(
-      (queryClient.getQueryData<OpenedRepoRow[]>(["opened-repos", user?.uid]) ?? []).map(
-        (r) => r.name
-      )
-    );
+  const { data: openedRepos } = useQuery<OpenedRepoRow[]>({
+    queryKey: ["opened-repos", user?.uid],
+    enabled: false,
+    queryFn: async () => queryClient.getQueryData<OpenedRepoRow[]>(["opened-repos", user?.uid]) ?? [],
+    initialData: () => queryClient.getQueryData<OpenedRepoRow[]>(["opened-repos", user?.uid]),
+    staleTime: Infinity,
+  });
 
-  const [openedRepoNames, setOpenedRepoNames] = useState<Set<string>>(readOpened);
-
-  useEffect(() => {
-    setOpenedRepoNames(readOpened());
-    const unsubscribe = queryClient.getQueryCache().subscribe(() => {
-      setOpenedRepoNames(readOpened());
-    });
-    return () => unsubscribe();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [queryClient, user?.uid]);
+  const openedRepoNames = useMemo(
+    () => new Set((openedRepos ?? []).map((r) => r.name)),
+    [openedRepos]
+  );
 
   const handlePageChange = (newPage: number) => {
     const params = new URLSearchParams(searchParams.toString());
