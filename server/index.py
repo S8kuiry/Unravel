@@ -9,6 +9,7 @@ import uvicorn
 from routers.user import router as user_router
 from routers.github import router as github_router
 from routers.ingestion import router as ingestion_router
+from routers.search import router as search_router
 #inngest imports
 import inngest.fast_api
 from inngest_worker.inngest_client import inngest_client
@@ -34,6 +35,8 @@ app.add_middleware(
 app.include_router(user_router)
 app.include_router(github_router)
 app.include_router(ingestion_router)
+app.include_router(search_router)
+
 
 
 
