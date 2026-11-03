@@ -118,6 +118,13 @@ export default function RepoWorkspacePage({
 
             if (res.status === "success") {
                 toast.success("GitHub Connected successfully!");
+                // Refetch repo files so the expired-session connect card clears
+                // and the workspace shows automatically without a manual refresh.
+                try {
+                    await filesQuery.refetch();
+                } catch {
+                    /* refetch may race with token propagation; next user action recovers */
+                }
             }
         } catch (error: unknown) {
             console.error("GitHub connect error:", error);
