@@ -1,8 +1,12 @@
 
 
+import logging
 import os
 from dotenv import load_dotenv
 load_dotenv()
+# Emit app-level INFO logs (e.g. search/embedding timings) to docker logs.
+# Python root logger defaults to WARNING, which hides logger.info() calls.
+logging.basicConfig(level=logging.INFO)
 from fastapi import FastAPI, Depends
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn

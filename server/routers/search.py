@@ -1,4 +1,5 @@
-
+import logging
+import time
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -12,6 +13,8 @@ from services.search.hybrid_search import hybrid_search
 
 from security.auth import get_current_uid
 
+logger = logging.getLogger(__name__)
+
 
 router = APIRouter()
 
@@ -22,6 +25,16 @@ async def search_repository(
     uid: str = Depends(get_current_uid),
     db: AsyncSession = Depends(get_db),
 ):
+    endpoint_start = time.perf_counter()
+    logger.info(
+        "SEARCH endpoint hit | repo_id=%s uid=%s branch=%s query=%r limit=%s",
+        request.repo_id,
+        uid,
+        request.branch,
+        request.query,
+        request.limit,
+    )
+
     # 1. Verify repository ownership
     statement = select(Repository).where(
         Repository.id == request.repo_id,
@@ -37,13 +50,21 @@ async def search_repository(
             detail="Repository not found",
         )
 
+    search_start = time.perf_counter()
     chunks = await hybrid_search(
-    db=db,
-    repo_id=repository.id,
-    branch=request.branch,
-    query=request.query,
-    limit=request.limit,
-)
+        db=db,
+        repo_id=repository.id,
+        branch=request.branch,
+        query=request.query,
+        limit=request.limit,
+    )
+    search_elapsed = time.perf_counter() - search_start
+    logger.info(
+        "HYBRID_SEARCH completed in %.3fs | repo_id=%s results=%d",
+        search_elapsed,
+        repository.id,
+        len(chunks),
+    )
 
     # 3. Convert chunks into API response
     results = [
@@ -57,6 +78,14 @@ async def search_repository(
         )
         for item in chunks
     ]
+
+    endpoint_total = time.perf_counter() - endpoint_start
+    logger.info(
+        "SEARCH endpoint completed | repo_id=%s total_time=%.3fs results_returned=%d",
+        request.repo_id,
+        endpoint_total,
+        len(results),
+    )
 
     return SearchResponse(
         results=results,

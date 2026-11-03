@@ -1,8 +1,12 @@
 
+import logging
+import time
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from models.github import RepoChunk
+
+logger = logging.getLogger(__name__)
 
 
 async def keyword_search(
@@ -43,11 +47,19 @@ async def keyword_search(
         .limit(limit)
     )
 
+    full_text_start = time.perf_counter()
     full_text_result = await db.execute(full_text_statement)
+    full_text_rows = full_text_result.all()
+    full_text_elapsed = time.perf_counter() - full_text_start
+    logger.info(
+        "KEYWORD_SEARCH full_text_query took %.3fs | rows_returned=%d",
+        full_text_elapsed,
+        len(full_text_rows),
+    )
 
     full_text_results = [
         {"chunk": chunk, "score": float(score)}
-        for chunk, score in full_text_result.all()
+        for chunk, score in full_text_rows
     ]
 
     # ---------------------------------
@@ -71,11 +83,19 @@ async def keyword_search(
         .limit(limit)
     )
 
+    trigram_start = time.perf_counter()
     trigram_result = await db.execute(trigram_statement)
+    trigram_rows = trigram_result.all()
+    trigram_elapsed = time.perf_counter() - trigram_start
+    logger.info(
+        "KEYWORD_SEARCH trigram_query took %.3fs | rows_returned=%d",
+        trigram_elapsed,
+        len(trigram_rows),
+    )
 
     trigram_results = [
         {"chunk": chunk, "score": float(score)}
-        for chunk, score in trigram_result.all()
+        for chunk, score in trigram_rows
     ]
 
     # ---------------------------------

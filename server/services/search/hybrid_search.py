@@ -1,7 +1,11 @@
 import asyncio
+import logging
+import time
 from sqlalchemy.ext.asyncio import AsyncSession
 from services.search.keyword_search import keyword_search
 from services.search.vector_search import vector_search
+
+logger = logging.getLogger(__name__)
 
 
 async def hybrid_search(
@@ -16,6 +20,7 @@ async def hybrid_search(
     fetch_limit = limit * 2
 
     # Run searches sequentially to prevent SQLAlchemy AsyncSession concurrency conflicts
+    keyword_start = time.perf_counter()
     keyword_results = await keyword_search(
         db=db,
         repo_id=repo_id,
@@ -23,13 +28,26 @@ async def hybrid_search(
         query=query,
         limit=fetch_limit,
     )
+    keyword_elapsed = time.perf_counter() - keyword_start
+    logger.info(
+        "HYBRID_SEARCH keyword_search took %.3fs | results=%d",
+        keyword_elapsed,
+        len(keyword_results),
+    )
     
+    vector_start = time.perf_counter()
     vector_results = await vector_search(
         db=db,
         repo_id=repo_id,
         branch=branch,
         query=query,
         limit=fetch_limit,
+    )
+    vector_elapsed = time.perf_counter() - vector_start
+    logger.info(
+        "HYBRID_SEARCH vector_search took %.3fs | results=%d",
+        vector_elapsed,
+        len(vector_results),
     )
 
     fused = {}
