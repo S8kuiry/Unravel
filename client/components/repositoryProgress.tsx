@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useAuth } from "@/context/AuthContext";
 import {
   IndexProgress,
@@ -11,6 +11,9 @@ interface RepositoryIndexPageProps {
   repoId?: string;
   branch: string;
 }
+
+const MAX_RETRIES = 10;
+const BASE_RETRY_DELAY_MS = 2000;
 
 // Swaps text with a fade, at most once per `interval` ms,
 // so fast-firing file events don't flicker.
@@ -47,28 +50,46 @@ export default function RepositoryIndexPage({
   const [progress, setProgress] = useState<IndexProgress | null>(null);
   const [status, setStatus] = useState("Connecting...");
   const [activeFile, setActiveFile] = useState("");
+  const [retryCount, setRetryCount] = useState(0);
 
-  useEffect(() => {
-    if (!repoId) {
-      setStatus("Waiting for repository...");
-      return;
+  const controllerRef = useRef<AbortController | null>(null);
+  const mountRef = useRef(true);
+  const retryTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const cleanup = useCallback(() => {
+    if (retryTimeoutRef.current) {
+      clearTimeout(retryTimeoutRef.current);
+      retryTimeoutRef.current = null;
     }
+    if (controllerRef.current) {
+      controllerRef.current.abort();
+      controllerRef.current = null;
+    }
+  }, []);
 
-    const controller = new AbortController();
+  const startProgressStream = useCallback(
+    async (isRetry = false) => {
+      if (!mountRef.current || !repoId) return;
 
-    const startProgressStream = async () => {
+      cleanup();
+
+      const controller = new AbortController();
+      controllerRef.current = controller;
+
       try {
-        // Get the actual token, not the function itself.
         const token = await getAuthToken();
+
+        if (!mountRef.current || controller.signal.aborted) return;
 
         if (!token) {
           setStatus("Authentication required");
           return;
         }
 
-        if (controller.signal.aborted) return;
-
-        setStatus("Connecting...");
+        if (!isRetry) {
+          setStatus("Connecting...");
+          setRetryCount(0);
+        }
 
         await streamRepositoryIndexProgress(
           token,
@@ -76,65 +97,127 @@ export default function RepositoryIndexPage({
           branch,
           {
             onConnected: () => {
+              if (!mountRef.current || controller.signal.aborted) return;
               setStatus("Connected");
+              setRetryCount(0);
             },
 
             onProgress: (data) => {
+              if (!mountRef.current || controller.signal.aborted) return;
               setProgress(data);
               if (data.finished) setStatus("Finished");
             },
 
             onJobStarted: (data) => {
+              if (!mountRef.current || controller.signal.aborted) return;
               setActiveFile(data.path);
             },
 
             onJobCompleted: (data) => {
+              if (!mountRef.current || controller.signal.aborted) return;
               console.log("Completed:", data.path);
             },
 
             onJobFailed: (data) => {
+              if (!mountRef.current || controller.signal.aborted) return;
               console.error("Failed:", data.path);
             },
 
             onJobSkipped: (data) => {
+              if (!mountRef.current || controller.signal.aborted) return;
               console.log("Skipped:", data.path);
             },
 
             onIndexingCompleted: () => {
+              if (!mountRef.current || controller.signal.aborted) return;
               setStatus("Indexing completed successfully");
             },
 
             onIndexingFinished: () => {
+              if (!mountRef.current || controller.signal.aborted) return;
               setStatus("Indexing finished");
             },
 
             onError: (error) => {
+              if (!mountRef.current || controller.signal.aborted) return;
               setStatus(error.message);
+
+              if (retryCount < MAX_RETRIES) {
+                const delay = Math.min(
+                  BASE_RETRY_DELAY_MS * 2 ** retryCount,
+                  30000
+                );
+                setStatus(`Reconnecting in ${Math.round(delay / 1000)}s…`);
+                retryTimeoutRef.current = setTimeout(() => {
+                  if (mountRef.current) {
+                    setRetryCount((c) => c + 1);
+                    startProgressStream(true);
+                  }
+                }, delay);
+              } else {
+                setStatus("Connection lost. Refresh to retry.");
+              }
             },
           },
           controller.signal
         );
       } catch (error) {
-        if (!controller.signal.aborted) {
-          setStatus(
-            error instanceof Error ? error.message : "Something went wrong"
+        if (!mountRef.current || controller.signal.aborted) return;
+
+        if (error instanceof Error && error.name === "AbortError") {
+          return;
+        }
+
+        setStatus(
+          error instanceof Error ? error.message : "Something went wrong"
+        );
+
+        if (retryCount < MAX_RETRIES) {
+          const delay = Math.min(
+            BASE_RETRY_DELAY_MS * 2 ** retryCount,
+            30000
           );
+          setStatus(`Reconnecting in ${Math.round(delay / 1000)}s…`);
+          retryTimeoutRef.current = setTimeout(() => {
+            if (mountRef.current) {
+              setRetryCount((c) => c + 1);
+              startProgressStream(true);
+            }
+          }, delay);
+        } else {
+          setStatus("Connection lost. Refresh to retry.");
         }
       }
-    };
+    },
+    [repoId, branch, getAuthToken, retryCount, cleanup]
+  );
 
-    startProgressStream();
+  useEffect(() => {
+    mountRef.current = true;
+
+    if (!repoId) {
+      setStatus("Waiting for repository...");
+      setProgress(null);
+      setRetryCount(0);
+      cleanup();
+      return;
+    }
+
+    startProgressStream(false);
 
     return () => {
-      controller.abort();
+      mountRef.current = false;
+      cleanup();
     };
-  }, [repoId, branch, getAuthToken]);
+  }, [repoId, branch, startProgressStream, cleanup]);
 
   const isDone =
     !!progress?.finished ||
     progress?.progress === 100 ||
     status === "Indexing completed successfully" ||
     status === "Indexing finished";
+
+  const hasProgress = progress !== null && progress.total_files > 0;
 
   const liveText = activeFile
     ? activeFile.split("/").slice(-2).join("/")
@@ -148,7 +231,7 @@ export default function RepositoryIndexPage({
       className={`relative inline-flex h-6 py-2 items-center gap-2 overflow-hidden px-2 text-xs backdrop-blur ${isDone ? "" : "w-50"
         }`}
     >
-      {isDone ? (
+      {isDone && hasProgress ? (
         <>
           <svg
             className="h-3.5 w-3.5 shrink-0 text-emerald-400"

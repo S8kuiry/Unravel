@@ -87,8 +87,12 @@ async def repository_index_progress_stream(
             else 0
         )
 
+        # Only consider indexing finished when there are actual files to track.
+        # If total_files is 0 (no jobs enqueued yet), keep polling so we don't
+        # prematurely emit "finished" and close the SSE before jobs appear.
         finished = (
-            pending_files == 0
+            total_files > 0
+            and pending_files == 0
             and processing_files == 0
         )
 
