@@ -2,7 +2,6 @@
 import asyncio
 import logging
 import uuid
-
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import (
@@ -12,9 +11,11 @@ from sqlalchemy import (
     func,
     exists,
     and_,
+    text,
 )
 from sqlalchemy.orm import aliased
-
+from sqlalchemy import func
+from sqlalchemy.dialects.postgresql import CHAR
 from db.database import AsyncSessionLocal
 from models.github import (
     RepoFile,
@@ -37,22 +38,23 @@ def utc_now():
     return datetime.now(timezone.utc)
 
 
+
+
 def build_search_vector(name, content):
     name_vector = func.setweight(
         func.to_tsvector(
             "english",
             func.coalesce(name, ""),
         ),
-        "A",
+        text("'A'::\"char\""),
     )
 
     content_vector = func.setweight(
         func.to_tsvector("english", content),
-        "B",
+        text("'B'::\"char\""),
     )
 
     return name_vector.op("||")(content_vector)
-
 
 # ---------------------------------------------------------
 # 1. CLAIM ONE JOB
