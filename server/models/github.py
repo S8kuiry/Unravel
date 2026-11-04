@@ -47,6 +47,8 @@ class Repository(Base):
     blobs = relationship("RepoBlob", cascade="all, delete-orphan", passive_deletes=True)
     sync_states = relationship("RepoSyncState", cascade="all, delete-orphan", passive_deletes=True)
     chunks = relationship("RepoChunk", cascade="all, delete-orphan", passive_deletes=True)
+    conversations = relationship( "Conversation", back_populates="repository",cascade="all, delete-orphan",passive_deletes=True,
+)
 
     __table_args__ = (
         UniqueConstraint("user_uid", "github_id", name="uq_repo_user_github"),
