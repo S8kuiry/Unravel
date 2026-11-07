@@ -7,7 +7,6 @@ from sqlalchemy import select, delete, or_
 from db.database import get_db
 from security.auth import get_current_uid
 import logging
-
 from models.conversation import (
     ConversationCreateRequest,
     ConversationResponse,
@@ -23,7 +22,7 @@ from crud.conversation import (
     get_conversation_by_id,
     rename_conversation,
     delete_conversation,
-    create_user_message,
+    create_message,
 )
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/conversations", tags=["conversations"])
@@ -196,14 +195,19 @@ async def send_user_message(
     if result.scalar_one_or_none() is None:
         raise HTTPException(404, "Conversation not found")
 
-    message = await create_user_message(
+    # 1. Save user message
+
+    message = await create_message(
         db=db,
         conversation=conversation,
         content=request.content,
         role=request.role,
     )
 
+    
+
     return message
+
 
 #conversation delete
 @router.delete("/{conversation_id}")

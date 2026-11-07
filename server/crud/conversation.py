@@ -82,7 +82,7 @@ async def delete_conversation(
 
 
 
-async def create_user_message(
+async def create_message(
     db: AsyncSession,
     conversation: Conversation,
     content: str,

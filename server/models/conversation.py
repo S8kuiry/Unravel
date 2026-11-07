@@ -1,6 +1,7 @@
 import uuid
 from datetime import datetime, timezone
 from uuid import UUID
+from typing import Literal
 from sqlalchemy import (
     Column,
     DateTime,
@@ -134,7 +135,8 @@ class ConversationCreateRequest(BaseModel):
 
 class MessageCreateRequest(BaseModel):
     content: str = Field(min_length=1)
-    role: str = Field(default="user")
+    # branch: str = Field(min_length=1)
+    role: Literal["user", "agent"] = "user"
     
 
 
