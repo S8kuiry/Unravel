@@ -1,28 +1,45 @@
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from server.models.github import Repository
+from models.github import Repository
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, delete, or_
 from db.database import get_db
 from security.auth import get_current_uid
-import uuid
 import logging
-from models.conversation import ConversationCreateRequest
-from crud.conversation import create_conversation
 
+from models.conversation import (
+    ConversationCreateRequest,
+    ConversationResponse,
+    ConversationListResponse,
+    ConversationDetailResponse,
+    ConversationRenameRequest,
+    MessageCreateRequest,
+    MessageResponse,
+)
+from crud.conversation import (
+    create_conversation,
+    get_repository_conversations,
+    get_conversation_by_id,
+    rename_conversation,
+    delete_conversation,
+    create_user_message,
+)
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/conversations", tags=["conversations"])
 
-@router.post("/")
-async def  create_new_conversation(
+
+# create conversation
+@router.post("/", response_model=ConversationResponse)
+async def create_new_conversation(
     request: ConversationCreateRequest,
-    uid : str = Depends(get_current_uid),
+    uid: str = Depends(get_current_uid),
     db: AsyncSession = Depends(get_db),
 ):
     # 1. Verify repository ownership
     statement = select(Repository).where(
-    Repository.id == request.repo_id,
-    Repository.user_uid == uid,
+        Repository.id == request.repo_id,
+        Repository.user_uid == uid,
     )
     result = await db.execute(statement)
     repository = result.scalar_one_or_none()
@@ -48,4 +65,175 @@ async def  create_new_conversation(
     )
 
     return conversation
+
+
+# -- get conversations for a repository
+@router.get("/repository/{repo_id}",response_model=ConversationListResponse)
+async def  get_conversations(
+    repo_id : UUID,
+    uid: str = Depends(get_current_uid),
+    db: AsyncSession = Depends(get_db),
+
+):
+     # 1. Verify repository ownership
+    statement = select(Repository).where(
+        Repository.id == repo_id,
+        Repository.user_uid == uid,
+    )
+
+    result = await db.execute(statement)
+    repository = result.scalar_one_or_none()
+
+    if repository is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Repository not found",
+        )
+
+    # 2. Fetch conversations
+    conversations = await get_repository_conversations(
+        db=db,
+        repo_id=repository.id,
+    )
+
+    # 3. Return response
+    return ConversationListResponse(
+        conversations=conversations,
+        total=len(conversations),
+    )
+
+
+
+# get repository conversation messages by id
+@router.get("/{conversation_id}", response_model=ConversationDetailResponse)
+async def get_conversation(
+    conversation_id: UUID,
+    uid: str = Depends(get_current_uid),
+    db: AsyncSession = Depends(get_db),
+):
+    conversation = await get_conversation_by_id(
+        db=db,
+        conversation_id=conversation_id,
+    )
+
+    if conversation is None:
+        raise HTTPException(404, "Conversation not found")
+
+    # Verify ownership through its repository
+    statement = select(Repository).where(
+        Repository.id == conversation.repo_id,
+        Repository.user_uid == uid,
+    )
+
+    result = await db.execute(statement)
+
+    if result.scalar_one_or_none() is None:
+        raise HTTPException(404, "Conversation not found")
+
+    return conversation
+
+
+
+#converstion rename 
+@router.patch("/{conversation_id}", response_model=ConversationResponse)
+async def update_conversation_title(
+    conversation_id: UUID,
+    request: ConversationRenameRequest,
+    uid: str = Depends(get_current_uid),
+    db: AsyncSession = Depends(get_db),
+):
+    conversation = await get_conversation_by_id(
+        db=db,
+        conversation_id=conversation_id,
+    )
+
+    if conversation is None:
+        raise HTTPException(404, "Conversation not found")
+
+    statement = select(Repository).where(
+        Repository.id == conversation.repo_id,
+        Repository.user_uid == uid,
+    )
+
+    result = await db.execute(statement)
+
+    if result.scalar_one_or_none() is None:
+        raise HTTPException(404, "Conversation not found")
+
+    return await rename_conversation(
+        db=db,
+        conversation=conversation,
+        title=request.title,
+    )
+
+
+# create  a message in a conversation
+@router.post(
+    "/{conversation_id}/messages",
+    response_model=MessageResponse,
+)
+async def send_user_message(
+    conversation_id: UUID,
+    request: MessageCreateRequest,
+    uid: str = Depends(get_current_uid),
+    db: AsyncSession = Depends(get_db),
+):
+    conversation = await get_conversation_by_id(
+        db=db,
+        conversation_id=conversation_id,
+    )
+
+    if conversation is None:
+        raise HTTPException(404, "Conversation not found")
+
+    statement = select(Repository).where(
+        Repository.id == conversation.repo_id,
+        Repository.user_uid == uid,
+    )
+
+    result = await db.execute(statement)
+
+    if result.scalar_one_or_none() is None:
+        raise HTTPException(404, "Conversation not found")
+
+    message = await create_user_message(
+        db=db,
+        conversation=conversation,
+        content=request.content,
+        role=request.role,
+    )
+
+    return message
+
+#conversation delete
+@router.delete("/{conversation_id}")
+async def remove_conversation(
+    conversation_id: UUID,
+    uid: str = Depends(get_current_uid),
+    db: AsyncSession = Depends(get_db),
+):
+    conversation = await get_conversation_by_id(
+        db=db,
+        conversation_id=conversation_id,
+    )
+
+    if conversation is None:
+        raise HTTPException(404, "Conversation not found")
+
+    statement = select(Repository).where(
+        Repository.id == conversation.repo_id,
+        Repository.user_uid == uid,
+    )
+
+    result = await db.execute(statement)
+
+    if result.scalar_one_or_none() is None:
+        raise HTTPException(404, "Conversation not found")
+
+    await delete_conversation(
+        db=db,
+        conversation=conversation,
+    )
+
+    return {"detail": "Conversation deleted successfully"}
 

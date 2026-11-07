@@ -1,4 +1,3 @@
-
 import uuid
 from datetime import datetime, timezone
 from uuid import UUID
@@ -10,7 +9,7 @@ from sqlalchemy import (
     String,
     Text,
 )
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import relationship
 from pydantic import BaseModel, ConfigDict, Field
 from db.database import Base
@@ -28,20 +27,19 @@ class Conversation(Base):
     __tablename__ = "conversations"
 
     id = Column(
-        UUID(as_uuid=True),
+        PG_UUID(as_uuid=True),
         primary_key=True,
         default=_uuid,
     )
 
     repo_id = Column(
-        UUID(as_uuid=True),
+        PG_UUID(as_uuid=True),
         ForeignKey("repositories.id", ondelete="CASCADE"),
         nullable=False,
     )
 
     title = Column(String(200), nullable=True)
 
-   
     created_at = Column(
         DateTime(timezone=True),
         nullable=False,
@@ -66,7 +64,8 @@ class Conversation(Base):
         back_populates="conversation",
         cascade="all, delete-orphan",
         passive_deletes=True,
-        order_by="Message.created_at, Message.id",    )
+        order_by="Message.created_at, Message.id",
+    )
 
     __table_args__ = (
         Index(
@@ -81,13 +80,13 @@ class Message(Base):
     __tablename__ = "messages"
 
     id = Column(
-        UUID(as_uuid=True),
+        PG_UUID(as_uuid=True),
         primary_key=True,
         default=_uuid,
     )
 
     conversation_id = Column(
-        UUID(as_uuid=True),
+        PG_UUID(as_uuid=True),
         ForeignKey("conversations.id", ondelete="CASCADE"),
         nullable=False,
     )
@@ -97,7 +96,6 @@ class Message(Base):
     role = Column(String(20), nullable=False)
 
     content = Column(Text, nullable=False)
-
 
     created_at = Column(
         DateTime(timezone=True),
@@ -120,7 +118,6 @@ class Message(Base):
     )
 
 
-
 # ==========================================
 # CONVERSATION REQUESTS
 # ==========================================
@@ -128,15 +125,6 @@ class Message(Base):
 class ConversationCreateRequest(BaseModel):
     repo_id: UUID
     title: str | None = Field(default=None, max_length=200)
-
-class ConversationResponse(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-
-    id: UUID
-    repo_id: UUID
-    title: str | None
-    created_at: datetime
-    updated_at: datetime
 
 
 
@@ -146,6 +134,8 @@ class ConversationResponse(BaseModel):
 
 class MessageCreateRequest(BaseModel):
     content: str = Field(min_length=1)
+    role: str = Field(default="user")
+    
 
 
 # ==========================================
@@ -183,3 +173,6 @@ class ConversationDetailResponse(ConversationResponse):
 class ConversationListResponse(BaseModel):
     conversations: list[ConversationResponse]
     total: int
+
+class ConversationRenameRequest(BaseModel):
+    title: str = Field(min_length=1, max_length=200)
