@@ -135,8 +135,9 @@ class ConversationCreateRequest(BaseModel):
 
 class MessageCreateRequest(BaseModel):
     content: str = Field(min_length=1)
-    # branch: str = Field(min_length=1)
+    branch: str = Field(min_length=1)
     role: Literal["user", "agent"] = "user"
+    context: list[dict] | None = None
     
 
 

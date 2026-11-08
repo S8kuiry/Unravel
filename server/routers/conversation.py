@@ -24,6 +24,7 @@ from crud.conversation import (
     delete_conversation,
     create_message,
 )
+from services.agent.agent import run_agent
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/conversations", tags=["conversations"])
 
@@ -195,18 +196,35 @@ async def send_user_message(
     if result.scalar_one_or_none() is None:
         raise HTTPException(404, "Conversation not found")
 
-    # 1. Save user message
-
-    message = await create_message(
+    # 1. Save the user's message
+    await create_message(
         db=db,
         conversation=conversation,
         content=request.content,
-        role=request.role,
+        role="user",
     )
 
-    
+    # 2. Generate the agent's response
+    answer = await run_agent(
+        message=request.content,
+        db=db,
+        repo_id=conversation.repo_id,
+        branch=request.branch,
+        context=request.context,
+    )
 
-    return message
+    # 3. Save the agent's response
+    agent_message = await create_message(
+        db=db,
+        conversation=conversation,
+        content=answer,
+        role="agent",
+    )
+
+    # 4. Return the agent's response
+    return agent_message
+
+
 
 
 #conversation delete

@@ -90,6 +90,20 @@ async def create_message(
 
 ) -> Message:
 
+    # Deduplication: return existing message if the same
+    # (conversation, role, content) already exists. Prevents
+    # duplicate rows when the same request is sent more than once.
+    existing = await db.execute(
+        select(Message).where(
+            Message.conversation_id == conversation.id,
+            Message.role == role,
+            Message.content == content,
+        )
+    )
+    existing_message = existing.scalar_one_or_none()
+    if existing_message is not None:
+        return existing_message
+
     message = Message(
         conversation_id=conversation.id,
         role=role,
