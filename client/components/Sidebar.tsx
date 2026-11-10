@@ -57,13 +57,15 @@ type Props = {
 const iconBtn =
   "rounded-md p-1.5 text-[#A39B90] outline-none transition-colors hover:bg-[#211E1B] hover:text-[#ECE7DF] focus-visible:ring-2 focus-visible:ring-[#F5A524]";
 
-function Mark() {
+function Mark({ collapsed }: { collapsed: boolean }) {
   return (
     <div className="flex items-center gap-2.5 ">
       <span className="flex h-6.5 w-6.5 items-center justify-center rounded-md bg-white text-sm font-bold text-amber-500">
         U
       </span>
-      <span className="text-white font-semibold tracking-wider text-sm">nravel</span>
+      {!collapsed && (
+        <span className="text-white font-semibold tracking-wider text-sm">nravel</span>
+      )}
     </div>
   );
 }
@@ -177,7 +179,7 @@ export default function Sidebar({
         {/* Header: the open/close control lives inside the sidebar */}
         <div className="flex h-14 shrink-0 items-center px-3">
           <div className={` mb-4 pt-8 px-2 flex w-full items-center justify-center gap-2.5 ${collapsed ? "md:hidden" : ""}`}>
-            <Mark />
+            <Mark collapsed={collapsed} />
             {/* <span className={`${serif.className} text-[15px] font-medium text-[#ECE7DF]`}>Unravel</span> */}
             <button onClick={onCloseMobile} aria-label="Close menu" className={`${iconBtn} ml-auto md:hidden`}>
               <X className="h-5 w-5" />
@@ -201,7 +203,7 @@ export default function Sidebar({
               className="group relative mx-auto hidden h-9 w-9 place-items-center rounded-lg outline-none hover:bg-[#211E1B] focus-visible:ring-2 focus-visible:ring-[#F5A524] md:grid"
             >
               <span className="transition-opacity group-hover:opacity-0 group-focus-visible:opacity-0">
-                <Mark />
+                <Mark collapsed={collapsed} />
               </span>
               <PanelLeftOpen className="absolute h-5 w-5 text-[#ECE7DF] opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100" />
             </button>

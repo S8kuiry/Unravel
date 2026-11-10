@@ -1,14 +1,13 @@
-import {  ConversationCreateRequest,
+
+import {
+  ConversationCreateRequest,
   ConversationResponse,
   ConversationListResponse,
   ConversationDetailResponse,
   ConversationRenameRequest,
   MessageCreateRequest,
   MessageResponse,
-  ConversationWebSocketRequest,
- } from "@/types/conversation";
-
-
+} from "@/types/conversation";
 
 const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
@@ -143,7 +142,37 @@ export async function renameConversation(
   return res.json();
 }
 
+// ==========================================
+// SEND MESSAGE
+// ==========================================
 
+/**
+ * Send a message in a conversation and receive the agent response.
+ * Backend: POST /conversations/{conversation_id}/messages
+ */
+export async function sendConversationMessage(
+  token: string,
+  conversation_id: string,
+  data: MessageCreateRequest
+): Promise<MessageResponse> {
+  const res = await fetch(
+    `${API_BASE_URL}/conversations/${encodeURIComponent(conversation_id)}/messages`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify(data),
+    }
+  );
+
+  if (!res.ok) {
+    await handleApiError(res, "Failed to send conversation message.");
+  }
+
+  return res.json();
+}
 
 // ==========================================
 // DELETE CONVERSATION
@@ -172,77 +201,4 @@ export async function deleteConversation(
   }
 
   return res.json();
-}
-
-
-
-// ==========================================
-// WEBSOCKET CONNECTION
-// ==========================================
-
-/**
- * Establish a WebSocket connection for a conversation.
- * Backend: WS /conversations/{conversation_id}?token=
- */
-export function connectConversationWebSocket(
-  conversation_id: string,
-  token: string
-): WebSocket {
-  const WS_BASE_URL = API_BASE_URL.replace(/^http/, "ws");
-
-  const url = `${WS_BASE_URL}/conversations/${encodeURIComponent(
-    conversation_id
-  )}?token=${encodeURIComponent(token)}`;
-
-  return new WebSocket(url);
-}
-
-// ==========================================
-// SEND WEBSOCKET MESSAGE
-// ==========================================
-
-/**
- * Send a message through an established WebSocket connection.
- */
-export function sendWebSocketMessage(
-  socket: WebSocket,
-  data: ConversationWebSocketRequest
-): void {
-  if (socket.readyState !== WebSocket.OPEN) {
-    throw new Error("WebSocket connection is not open.");
-  }
-
-  if (!data.message.trim()) {
-    throw new Error("Message cannot be empty.");
-  }
-
-  if (!data.branch.trim()) {
-    throw new Error("Branch is required.");
-  }
-
-  socket.send(
-    JSON.stringify({
-      message: data.message,
-      branch: data.branch,
-      context: data.context ?? null,
-    })
-  );
-}
-
-// ==========================================
-// DISCONNECT WEBSOCKET
-// ==========================================
-
-/**
- * Close an established WebSocket connection.
- */
-export function disconnectConversationWebSocket(
-  socket: WebSocket
-): void {
-  if (
-    socket.readyState === WebSocket.OPEN ||
-    socket.readyState === WebSocket.CONNECTING
-  ) {
-    socket.close(1000, "Client disconnected");
-  }
 }

@@ -43,26 +43,26 @@ export interface ConversationRenameRequest {
 
 // ==========================================
 // WEBSOCKET TYPES
-// ==========================================
+// // ==========================================
 
-export interface ConversationWebSocketRequest {
-  message: string;
-  branch: string;
-  context?: Record<string, unknown>[] | null;
-}
+// export interface ConversationWebSocketRequest {
+//   message: string;
+//   branch: string;
+//   context?: Record<string, unknown>[] | null;
+// }
 
-export interface ConversationWebSocketMessage {
-  id: string;
-  role: "user" | "agent";
-  content: string;
-  created_at: string;
-}
+// export interface ConversationWebSocketMessage {
+//   id: string;
+//   role: "user" | "agent";
+//   content: string;
+//   created_at: string;
+// }
 
-export interface ConversationWebSocketResponse {
-  type:
-    | "user_message_saved"
-    | "agent_message_saved"
-    | "error";
-  message: ConversationWebSocketMessage | string;
-}
+// export interface ConversationWebSocketResponse {
+//   type:
+//     | "user_message_saved"
+//     | "agent_message_saved"
+//     | "error";
+//   message: ConversationWebSocketMessage | string;
+// }
 

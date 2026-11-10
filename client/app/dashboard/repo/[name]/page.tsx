@@ -27,13 +27,14 @@ import { useExpandedFolders } from "@/lib/useExpandedFolders";
 import { OpenedRepoRow } from "@/types/github";
 import BranchSelector from "@/components/workspace/BranchSelector";
 import RepositoryIndexPage from "@/components/repositoryProgress";
+import ChatHome from "@/components/chat/ChatHome";
 
 export default function RepoWorkspacePage({
     params,
 }: {
     params: Promise<{ name: string }>;
 }) {
-    const { user } = useAuth()
+    const { user, dbUser } = useAuth()
     const resolvedParams = use(params);
     const repoName = resolvedParams.name;
     const searchParams = useSearchParams();
@@ -145,7 +146,6 @@ export default function RepoWorkspacePage({
             setLoginGit(false);
         }
     };
-
 
 
     /* ---------- File list ---------- */
@@ -429,7 +429,25 @@ export default function RepoWorkspacePage({
 
             {/* Main Resizable Workspace */}
             <div className="min-h-0 flex-1">
-                {filesExpired ? (
+                {!dbUser?.git_authorized ? (
+                    <div className="mx-auto mt-20 max-w-md text-center">
+                        <div className="mx-auto grid h-14 w-14 place-items-center rounded-xl border border-[#2B2723] bg-[#181614] text-[#ECE7DF]">
+                            <GithubMark className="h-7 w-7" />
+                        </div>
+                        <h1 className={`${serif.className} mt-6 text-3xl font-medium text-[#ECE7DF]`}>
+                            Connect your GitHub account
+                        </h1>
+                        <p className="mt-3 text-sm leading-relaxed text-[#A39B90]">
+                            Unravel needs access to your repositories so it can index the ones you choose and answer questions about them.
+                        </p>
+                        <button
+                            onClick={handleGithubConnect}
+                            className="mt-6 inline-flex items-center gap-2 rounded-lg bg-[#F5A524] px-4 py-2.5 text-sm font-medium text-[#1A1206] outline-none transition-colors hover:bg-[#FBBF4D]"
+                        >
+                            <GithubMark /> {loginGit ? "Connecting..." : "Connect GitHub"}
+                        </button>
+                    </div>
+                ) : filesExpired ? (
                     <div className="mx-auto mt-20 max-w-md text-center">
                         <div className="mx-auto grid h-14 w-14 place-items-center rounded-xl border border-[#2B2723] bg-[#181614] text-[#ECE7DF]">
                             <GithubMark className="h-7 w-7" />
@@ -571,45 +589,14 @@ export default function RepoWorkspacePage({
                         <Handle direction="horizontal" />
 
                         {/* RIGHT PANEL: AI Assistant Chat */}
-                        <Panel id="ai-chat" defaultSize={35} minSize={25}>
+                        <Panel id="ai-chat" defaultSize={20} minSize={20}>
                             <Card
                                 title="Unravel Assistant"
                                 meta="Agentic Chat"
                                 action={<Sparkles className="h-4 w-4 text-[#F5A524]" />}
                             >
-                                <div className="flex h-full flex-col justify-between p-4">
 
-                                    {/* Message Log */}
-                                    <div className="space-y-4 overflow-y-auto">
-                                        <div className="flex gap-3 text-xs leading-relaxed">
-                                            <div className="grid h-6 w-6 shrink-0 place-items-center rounded bg-[#F5A524] font-bold text-[#1A1206]">
-                                                AI
-                                            </div>
-                                            <div className="rounded-lg border border-[#2B2723] bg-[#211E1B]/60 p-3 text-[#ECE7DF]">
-                                                <p>
-                                                    I have indexed <span className="font-semibold">{repoName}</span>. Ask me questions about repository files, structure, or code logic.
-                                                </p>
-                                            </div>
-                                        </div>
-                                    </div>
-
-                                    {/* Input Controls */}
-                                    <div className="mt-4 pt-3 border-t border-[#2B2723]">
-                                        <div className="relative flex items-end rounded-xl border border-[#2B2723] bg-[#0E0D0C] p-2 focus-within:border-[#F5A524] focus-within:ring-1 focus-within:ring-[#F5A524]">
-                                            <textarea
-                                                value={chatInput}
-                                                onChange={(e) => setChatInput(e.target.value)}
-                                                placeholder="Ask about this codebase..."
-                                                className="max-h-32 min-h-[40px] w-full resize-none bg-transparent px-2 py-1 text-xs text-[#ECE7DF] outline-none placeholder:text-[#6F675D]"
-                                                rows={1}
-                                            />
-                                            <button className="mb-0.5 ml-2 grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-[#F5A524] text-[#1A1206] transition-colors hover:bg-[#FBBF4D]">
-                                                <Send className="h-3.5 w-3.5" />
-                                            </button>
-                                        </div>
-                                    </div>
-
-                                </div>
+<ChatHome repoId={repositoryId} repoName={repoName} branch={currentBranch} />
                             </Card>
                         </Panel>
 
