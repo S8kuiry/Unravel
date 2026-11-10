@@ -99,7 +99,7 @@ function mapGithubRepoToUI(
 }
 
 export default function WorkspacePage() {
-  const { dbUser, getAuthToken, fetchDbUser } = useAuth();
+  const { dbUser, getAuthToken, fetchDbUser, loading } = useAuth();
   const wide = useIsWide();
 
   // 1. ALL HOOKS DEFINED FIRST AT TOP LEVEL
@@ -204,7 +204,16 @@ export default function WorkspacePage() {
 
 
   // 2. EARLY RETURNS PLACED AFTER ALL HOOKS
-  if (!dbUser || wide === null) return null;
+  if (loading || wide === null) {
+    return (
+      <div className="flex h-full items-center justify-center">
+        <div className="flex flex-col items-center gap-2 animate-pulse">
+          <div className="h-8 w-24 rounded bg-[#181614]"></div>
+          <div className="h-4 w-16 rounded bg-[#181614]"></div>
+        </div>
+      </div>
+    );
+  }
 
   // GitHub Login Handler
   const handleGithubConnect = async () => {
@@ -282,7 +291,7 @@ export default function WorkspacePage() {
 
 
   // -------Not connected view.---------------
-  if (!dbUser.git_authorized) {
+  if (!dbUser?.git_authorized) {
     return (
       <div className="mx-auto mt-20 max-w-md text-center">
         <div className="mx-auto grid h-14 w-14 place-items-center rounded-xl border border-[#2B2723] bg-[#181614] text-[#ECE7DF]">

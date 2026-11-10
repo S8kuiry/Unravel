@@ -15,6 +15,7 @@ from routers.github import router as github_router
 from routers.ingestion import router as ingestion_router
 from routers.search import router as search_router
 from routers.conversation import router as conversation_router
+from routers.websocket import router as  websocket_router
 
 #inngest imports
 import inngest.fast_api
@@ -43,7 +44,7 @@ app.include_router(github_router)
 app.include_router(ingestion_router)
 app.include_router(search_router)
 app.include_router(conversation_router)
-
+app.include_router(websocket_router, prefix="/ws")
 
 
 

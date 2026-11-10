@@ -103,23 +103,31 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   // Handle Firebase auth state changes cleanly
   useEffect(() => {
-  const unsubscribe = onIdTokenChanged(auth, (firebaseUser) => {
-    setUser(firebaseUser);
+    const unsubscribe = onIdTokenChanged(auth, async (firebaseUser) => {
+      setUser(firebaseUser);
 
-    if (!firebaseUser) {
-      setDbUser(null);
-      setLoading(false);
-      return;
-    }
+      if (!firebaseUser) {
+        setDbUser(null);
+        setLoading(false);
+        return;
+      }
 
-    // Firebase authentication is ready.
-    // Google/GitHub login handlers are responsible for
-    // syncing the user to the backend and calling setDbUser().
-    setLoading(false);
-  });
+      // Firebase authentication is ready.
+      // Populate dbUser from backend if not already cached.
+      if (!dbUser) {
+        try {
+          const res = await fetchDbUser();
+          if (!res) setLoading(false);
+        } catch {
+          setLoading(false);
+        }
+      } else {
+        setLoading(false);
+      }
+    });
 
-  return unsubscribe;
-}, [setDbUser]);
+    return unsubscribe;
+  }, [setDbUser, fetchDbUser, dbUser]);
 
   const value = useMemo(
     () => ({
