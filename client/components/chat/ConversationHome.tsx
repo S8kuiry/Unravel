@@ -26,7 +26,7 @@ import {
     deleteConversation,
 } from "@/api/conversation";
 
-import type { ConversationListResponse, ConversationResponse } from "@/types/conversation";
+import type { ConversationDetailResponse, ConversationListResponse, ConversationResponse } from "@/types/conversation";
 
 // ==========================================
 // TYPES
@@ -122,7 +122,7 @@ export default function ConversationHome({
     // RENAME CONVERSATION
     // ======================================
 
-    const renameMutation = useMutation({
+        const renameMutation = useMutation({
         mutationFn: async ({
             id,
             title,
@@ -139,11 +139,32 @@ export default function ConversationHome({
             return renameConversation(token, id, { title });
         },
 
-        onSuccess: () => {
-            queryClient.invalidateQueries({ queryKey });
-            toast.success("Conversation renamed");
+        // Server confirmed: patch caches from the response, no refetch
+        onSuccess: (updated) => {
+            queryClient.setQueryData<ConversationListResponse>(queryKey, (old) =>
+                old && {
+                    ...old,
+                    conversations: old.conversations.map((c) =>
+                        c.id === updated.id
+                            ? { ...c, title: updated.title, updated_at: updated.updated_at }
+                            : c
+                    ),
+                }
+            );
+
+            queryClient.setQueryData<ConversationDetailResponse>(
+                ["conversation", updated.id],
+                (old) =>
+                    old && {
+                        ...old,
+                        title: updated.title,
+                        updated_at: updated.updated_at,
+                    }
+            );
+
             setEditingId(null);
             setEditingTitle("");
+            toast.success("Conversation renamed");
         },
 
         onError: (error: Error) => {
