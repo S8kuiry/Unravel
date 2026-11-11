@@ -590,7 +590,7 @@ export default function RepoWorkspacePage({
                         <Handle direction="horizontal" />
 
                         {/* RIGHT PANEL: AI Assistant Chat */}
-                        <Panel id="ai-chat" defaultSize={20} minSize={20}>
+                        <Panel id="ai-chat" defaultSize={22} minSize={20}>
                             <Card
                                 title="Unravel Assistant"
                                 // meta="Agentic Chat"

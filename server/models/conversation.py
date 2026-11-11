@@ -127,6 +127,8 @@ class ConversationCreateRequest(BaseModel):
     repo_id: UUID
     title: str | None = Field(default=None, max_length=200)
 
+class ConversationTitleRequest(BaseModel):
+    content: str = Field(min_length=1, max_length=2000)
 
 
 # ==========================================

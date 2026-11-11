@@ -40,6 +40,10 @@ export interface ConversationRenameRequest {
   title: string;
 }
 
+export interface ConversationTitleRequest {
+  content: string;
+}
+
 
 // ==========================================
 // WEBSOCKET TYPES

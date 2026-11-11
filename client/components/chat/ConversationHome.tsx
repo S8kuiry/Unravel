@@ -277,7 +277,7 @@ export default function ConversationHome({
 
                 {/* Conversation Items */}
                 {!isLoading && !isError && conversations.length > 0 && (
-                    <div className="space-y-1">
+                    <div className="space-y-1.5">
 
                         {conversations.map((conversation) => (
                             <div

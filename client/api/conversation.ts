@@ -7,6 +7,7 @@ import {
   ConversationRenameRequest,
   MessageCreateRequest,
   MessageResponse,
+  ConversationTitleRequest,
 } from "@/types/conversation";
 
 const API_BASE_URL =
@@ -202,3 +203,38 @@ export async function deleteConversation(
 
   return res.json();
 }
+
+
+
+// ==========================================
+// GENERATE CONVERSATION TITLE
+// ==========================================
+
+/**
+ * Generate an AI title from the first user message.
+ * Backend: POST /conversations/{conversation_id}/title
+ */
+export async function generateConversationTitle(
+  token: string,
+  conversation_id: string,
+  data: ConversationTitleRequest
+): Promise<ConversationResponse> {
+  const res = await fetch(
+    `${API_BASE_URL}/conversations/${encodeURIComponent(conversation_id)}/title`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify(data),
+    }
+  );
+
+  if (!res.ok) {
+    await handleApiError(res, "Failed to generate conversation title.");
+  }
+
+  return res.json();
+}
+

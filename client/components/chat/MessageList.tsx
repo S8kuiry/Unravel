@@ -8,6 +8,7 @@ import {
     Sparkles,
     AlertCircle,
 } from "lucide-react";
+import MarkdownRenderer from "./MarkdownRenderer";
 
 // ==========================================
 // TYPES
@@ -99,117 +100,112 @@ export default function MessageList({
     // ======================================
 
     return (
-        <div className="h-full overflow-y-auto px-3 py-4">
+        <div className="relative h-full">
+            <div className="pointer-events-none absolute -top-10 right-0 h-48 w-48 rounded-full bg-[#F5A524]/10 blur-3xl" />
+            <div className="pointer-events-none absolute bottom-0 left-0 h-48 w-48 rounded-full bg-[#F5A524]/[0.06] blur-3xl" />
+            <div className="relative h-full overflow-y-auto px-3 py-4">
+                <div className="mx-auto flex max-w-3xl flex-col gap-5">
 
-            <div className="mx-auto flex max-w-3xl flex-col gap-5">
+                    {messages.map((message) => {
 
-                {messages.map((message) => {
+                        const isUser = message.role === "user";
+                        const isError = message.status === "error";
+                        const isPending = message.status === "pending";
 
-                    const isUser = message.role === "user";
-                    const isError = message.status === "error";
-                    const isPending = message.status === "pending";
-
-                    return (
-                        <div
-                            key={message.id}
-                            className={`flex gap-2.5 ${
-                                isUser ? "flex-row-reverse" : "flex-row"
-                            }`}
-                        >
-
-                            {/* Avatar */}
+                        return (
                             <div
-                                className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-lg ${
-                                    isUser
-                                        ? "bg-[#302820]"
-                                        : "bg-[#3A2B18]"
-                                }`}
+                                key={message.id}
+                                className={`flex ${isUser ? "justify-end" : "justify-start"}`}
                             >
-                                {isUser ? (
-                                    <User
-                                        size={14}
-                                        className="text-[#C9BBA9]"
-                                    />
-                                ) : (
-                                    <Bot
-                                        size={15}
-                                        className="text-[#F5A524]"
-                                    />
-                                )}
-                            </div>
+                                <div
+                                    className={`min-w-0 rounded-2xl border px-3.5 py-3 backdrop-blur-xl ${isUser
+                                        ? "max-w-[85%] border-[#F5A524]/20 bg-gradient-to-br from-[#F5A524]/[0.14] to-[#302820]/60 text-[#F1E9DD] shadow-[0_4px_24px_-8px_rgba(245,165,36,0.3)]"
+                                        :
+                                        "relative max-w-[98%] overflow-hidden border-white/[0.10] bg-gradient-to-br from-white/[0.04] via-white/[0.02] to-[#F5A524]/[0.04] backdrop-blur-xl text-[#E3DBCF] ring-1 ring-inset ring-white/[0.04] shadow-[0_12px_40px_-12px_rgba(0,0,0,0.7),inset_0_1px_0_rgba(255,255,255,0.10)]"}`}
+                                >
 
-                            {/* Message Content */}
-                            <div
-                                className={`min-w-0 max-w-[85%] rounded-xl px-3 py-2.5 ${
-                                    isUser
-                                        ? "bg-[#302820] text-[#E8E2D9]"
-                                        : "border border-[#302B25] bg-[#1D1915] text-[#DDD5CA]"
-                                }`}
-                            >
-
-                                {/* Role */}
-                                <div className="mb-1.5 flex items-center gap-2">
-                                    <span className="text-[10px] font-semibold text-[#A89C8C]">
-                                        {isUser ? "You" : "Unravel Assistant"}
-                                    </span>
-
-                                    {isError && (
-                                        <span className="flex items-center gap-1 text-[9px] text-red-400">
-                                            <AlertCircle size={10} />
-                                            Failed
-                                        </span>
+                                    {/* Agent header */}
+                                    {!isUser && (
+                                        <>
+                                            {/* amber top hairline */}
+                                            {/* <div className="pointer-events-none absolute inset-x-8 top-0 h-px bg-gradient-to-r from-transparent via-[#F5A524]/50 to-transparent" /> */}
+                                            {/* soft corner glow */}
+                                            {/* <div className="pointer-events-none absolute -left-10 -top-10 h-28 w-28 rounded-full bg-[#F5A524]/10 blur-2xl" /> */}
+                                            <div className="mb-2 flex items-center gap-1.5">
+                                                <div className="flex h-5 w-5 shrink-0 items-center justify-center rounded-md bg-[#F5A524]/15 ring-1 ring-[#F5A524]/25">
+                                                    <Bot size={12} className="text-[#F5A524]" />
+                                                </div>
+                                                <span className="text-[10px] font-semibold tracking-wide text-[#A89C8C]">
+                                                    Unravel Assistant
+                                                </span>
+                                                {isError && (
+                                                    <span className="flex items-center gap-1 text-[9px] text-red-400">
+                                                        <AlertCircle size={10} />
+                                                        Failed
+                                                    </span>
+                                                )}
+                                            </div>
+                                        </>
                                     )}
-                                </div>
 
-                                {/* Content */}
-                                {isPending && !message.content ? (
+                                    {/* Content (user: text + avatar side by side) */}
+                                    <div className={isUser ? "flex items-start gap-2.5" : ""}>
 
-                                    <div className="flex items-center gap-2 py-1 text-xs text-[#A39B90]">
-                                        <span className="flex gap-1">
-                                            <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-[#F5A524]" />
-                                            <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-[#F5A524] [animation-delay:150ms]" />
-                                            <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-[#F5A524] [animation-delay:300ms]" />
-                                        </span>
+                                        {isPending && !message.content ? (
+                                            <div className="flex items-center gap-2 py-1 text-xs text-[#A39B90]">
+                                                <span className="flex gap-1">
+                                                    <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-[#F5A524]" />
+                                                    <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-[#F5A524] [animation-delay:150ms]" />
+                                                    <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-[#F5A524] [animation-delay:300ms]" />
+                                                </span>
+                                                {isUser ? "Sending..." : "Thinking..."}
+                                            </div>
+                                        ) : (
+                                            isUser ? (
+                                                <p className="min-w-0 whitespace-pre-wrap break-words text-xs leading-relaxed">
+                                                    {message.content}
+                                                </p>
+                                            ) : (
+                                                <MarkdownRenderer content={message.content} />
+                                            )
+                                        )}
 
-                                        {isUser ? "Sending..." : "Thinking..."}
+                                        {isUser && (
+                                            <div className="flex h-5 w-5 shrink-0 items-center justify-center rounded-md bg-white/[0.08] ring-1 ring-white/10">
+                                                <User size={11} className="text-[#E3D6C4]" />
+                                            </div>
+                                        )}
                                     </div>
 
-                                ) : (
-
-                                    <p className="whitespace-pre-wrap break-words text-xs leading-relaxed">
-                                        {message.content}
-                                    </p>
-
-                                )}
-
-                                {/* Timestamp */}
-                                <p className="mt-2 text-right text-[9px] text-[#756D63]">
-                                    {new Date(message.created_at).toLocaleTimeString(
-                                        undefined,
-                                        {
+                                    {/* Timestamp */}
+                                    <p className="mt-2 text-right text-[9px] text-[#756D63]">
+                                        {isUser && isError && (
+                                            <span className="mr-2 text-red-400">Failed</span>
+                                        )}
+                                        {new Date(message.created_at).toLocaleTimeString(undefined, {
                                             hour: "2-digit",
                                             minute: "2-digit",
-                                        }
-                                    )}
-                                </p>
+                                        })}
+                                    </p>
 
+                                </div>
                             </div>
+                        );
+                    })}
 
+                    {/* Sending Indicator */}
+                    {isSending && (
+                        <div className="flex w-fit items-center gap-2 rounded-full border border-white/[0.07] bg-[#1D1915]/60 px-3 py-1.5 text-[10px] text-[#938A7F] backdrop-blur-xl">
+                            <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-[#F5A524]" />
+                            Processing your message...
                         </div>
-                    );
-                })}
+                    )}
 
-                {/* Sending Indicator */}
-                {isSending && (
-                    <div className="flex items-center gap-2 pl-9 text-[10px] text-[#827A70]">
-                        <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-[#F5A524]" />
-                        Processing your message...
-                    </div>
-                )}
+                    <div ref={bottomRef} />
 
-                <div ref={bottomRef} />
-
+                </div>
             </div>
         </div>
+
     );
 }

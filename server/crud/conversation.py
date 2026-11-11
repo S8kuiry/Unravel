@@ -2,10 +2,58 @@
 from uuid import UUID
 from datetime import datetime, timezone
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 from models.conversation import Conversation,Message
+from sqlalchemy import select, func
 
+
+async def title_exists(
+    db: AsyncSession,
+    repo_id: UUID,
+    title: str,
+    exclude_id: UUID,
+) -> bool:
+    """True if another conversation in this repo already has this title."""
+    statement = (
+        select(Conversation.id)
+        .where(
+            Conversation.repo_id == repo_id,
+            Conversation.id != exclude_id,
+            func.lower(Conversation.title) == title.lower(),
+        )
+        .limit(1)
+    )
+    result = await db.execute(statement)
+    return result.first() is not None
+
+
+async def make_unique_title(
+    db: AsyncSession,
+    repo_id: UUID,
+    title: str,
+    exclude_id: UUID,
+) -> str:
+    """Return the title, or 'Title (N)' where N = highest existing suffix + 1."""
+    if not await title_exists(db, repo_id, title, exclude_id):
+        return title
+
+    base = title[:50]  # leave room for the suffix
+
+    statement = select(Conversation.title).where(
+        Conversation.repo_id == repo_id,
+        Conversation.id != exclude_id,
+        func.lower(Conversation.title).like(base.lower() + " (%)"),
+    )
+    result = await db.execute(statement)
+
+    prefix = base.lower() + " ("
+    highest = 1  # the plain title counts as copy 1
+    for (t,) in result.all():
+        t = (t or "").lower()
+        if t.startswith(prefix) and t.endswith(")") and t[len(prefix):-1].isdigit():
+            highest = max(highest, int(t[len(prefix):-1]))
+
+    return f"{base} ({highest + 1})"
 
 async def create_conversation(
     db: AsyncSession,

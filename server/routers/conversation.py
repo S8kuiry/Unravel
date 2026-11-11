@@ -13,6 +13,7 @@ from models.conversation import (
     ConversationListResponse,
     ConversationDetailResponse,
     ConversationRenameRequest,
+    ConversationTitleRequest,
     MessageCreateRequest,
     MessageResponse,
 )
@@ -20,11 +21,13 @@ from crud.conversation import (
     create_conversation,
     get_repository_conversations,
     get_conversation_by_id,
+    make_unique_title,
     rename_conversation,
     delete_conversation,
     create_message,
 )
 from services.agent.agent import run_agent
+from services.agent.groq_client import generate_title
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/conversations", tags=["conversations"])
 
@@ -224,6 +227,59 @@ async def send_user_message(
     # 4. Return the agent's response
     return agent_message
 
+
+
+# generate an AI title from the first user message
+@router.post("/{conversation_id}/title", response_model=ConversationResponse)
+async def generate_conversation_title(
+    conversation_id: UUID,
+    request: ConversationTitleRequest,
+    uid: str = Depends(get_current_uid),
+    db: AsyncSession = Depends(get_db),
+):
+    conversation = await get_conversation_by_id(
+        db=db,
+        conversation_id=conversation_id,
+    )
+
+    if conversation is None:
+        raise HTTPException(404, "Conversation not found")
+
+    statement = select(Repository).where(
+        Repository.id == conversation.repo_id,
+        Repository.user_uid == uid,
+    )
+    result = await db.execute(statement)
+
+    if result.scalar_one_or_none() is None:
+        raise HTTPException(404, "Conversation not found")
+
+    # Guard: only replace an empty title or the frontend placeholder
+    # (the placeholder is a truncated prefix of the first message).
+    # A manual rename never matches, so it is never overwritten.
+    normalized = " ".join(request.content.split())
+    current = (conversation.title or "").rstrip("…").strip()
+    if current and not normalized.startswith(current):
+        return conversation
+
+    new_title = await generate_title(request.content)
+
+    if not new_title:
+        return conversation  # keep the fallback title
+
+    # Dedupe in the DB (no AI involved)
+    unique_title = await make_unique_title(
+        db=db,
+        repo_id=conversation.repo_id,
+        title=new_title,
+        exclude_id=conversation.id,
+    )
+
+    return await rename_conversation(
+        db=db,
+        conversation=conversation,
+        title=unique_title,
+    )
 
 
 

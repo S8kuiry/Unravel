@@ -3,6 +3,7 @@
 
 import { useState } from "react";
 import {
+    useMutation,
     useQuery,
     useQueryClient,
 } from "@tanstack/react-query";
@@ -18,6 +19,7 @@ import { useAuth } from "@/context/AuthContext";
 
 import {
     createConversation,
+    generateConversationTitle,
     getConversationById,
     sendConversationMessage,
 } from "@/api/conversation";
@@ -43,6 +45,15 @@ interface ChatViewProps {
     onBack: () => void;
     onConversationCreated: (id: string) => void;
 }
+
+
+function makeTitle(text: string, limit = 50) {
+    const clean = text.replace(/\s+/g, " ").trim();
+    if (clean.length <= limit) return clean;
+    return clean.slice(0, limit).replace(/\s+\S*$/, "") + "…";
+}
+
+
 
 // ==========================================
 // COMPONENT
@@ -95,6 +106,50 @@ export default function ChatView({
     // SEND MESSAGE
     // ======================================
 
+       const generateTitle = useMutation({
+        mutationFn: async ({
+            conversationId,
+            content,
+        }: {
+            conversationId: string;
+            content: string;
+        }) => {
+            const token = await getAuthToken();
+            if (!token) throw new Error("Authentication required");
+            return generateConversationTitle(token, conversationId, { content });
+        },
+
+        // Quietly patch both caches, no refetch
+        onSuccess: (updated) => {
+            queryClient.setQueryData<ConversationListResponse>(
+                ["conversations", repoId],
+                (old) =>
+                    old && {
+                        ...old,
+                        conversations: old.conversations.map((c) =>
+                            c.id === updated.id
+                                ? { ...c, title: updated.title, updated_at: updated.updated_at }
+                                : c
+                        ),
+                    }
+            );
+
+            queryClient.setQueryData<ConversationDetailResponse>(
+                ["conversation", updated.id],
+                (old) =>
+                    old && {
+                        ...old,
+                        title: updated.title,
+                        updated_at: updated.updated_at,
+                    }
+            );
+        },
+
+        // Fallback title stays; nothing to show the user
+        onError: () => {},
+    });
+
+
     const handleSend = async (content: string) => {
         if (!content.trim() || isSending) return;
         setIsSending(true);
@@ -109,12 +164,17 @@ export default function ChatView({
             if (!token) throw new Error("Authentication required");
 
             if (!activeId) {
-                const created = await createConversation(token, { repo_id: repoId });
+                const created = await createConversation(token, {
+                    repo_id: repoId,
+                    title: makeTitle(content),
+                });
                 activeId = created.id;
                 queryClient.setQueryData<ConversationDetailResponse>(
                     ["conversation", activeId],
                     { ...created, messages: [] }
                 );
+
+                generateTitle.mutate({ conversationId: created.id, content });
 
                 // Add the new conversation to the list cache
                 queryClient.setQueryData<ConversationListResponse>(
@@ -201,7 +261,7 @@ export default function ChatView({
         <div className="flex h-full min-h-0 flex-col bg-[#141210] text-[#E8E2D9]">
 
             {/* Chat Header */}
-            <div className="flex shrink-0 items-center gap-3 border-b border-[#302B25] px-3 py-3">
+            <div className="flex shrink-0 items-center gap-3  px-3 py-3">
 
                 <button
                     onClick={onBack}
@@ -217,7 +277,7 @@ export default function ChatView({
 
                 <div className="min-w-0 flex-1">
                     <h3 className="truncate text-xs font-semibold">
-                        Unravel Assistant
+                        {conversation?.title ?? "New Conversation"}
                     </h3>
 
                     <p className="truncate text-[10px] text-[#827A70]">
@@ -225,12 +285,12 @@ export default function ChatView({
                     </p>
                 </div>
 
-                <div className="flex items-center gap-1 rounded-full border border-[#51402A] px-2 py-1">
+                {/* <div className="flex items-center gap-1 rounded-full border border-[#51402A] px-2 py-1">
                     <Sparkles size={10} className="text-[#F5A524]" />
                     <span className="text-[9px] text-[#D6A75F]">
                         Agent
                     </span>
-                </div>
+                </div> */}
 
             </div>
 

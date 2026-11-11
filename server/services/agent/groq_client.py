@@ -48,3 +48,34 @@ async def generate_response(
     )
 
     return response.choices[0].message
+
+
+
+async def generate_title(first_message: str) -> str | None:
+    """Return a short chat title like ChatGPT/Claude, or None on any failure."""
+    try:
+        client = await get_groq_client()
+        response = await client.chat.completions.create(
+            model=os.getenv("TITLE_MODEL", "openai/gpt-oss-120b"),
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        "You name chat conversations. Given the user's first "
+                        "message, reply with a short title of 2 to 5 words that "
+                        "captures the topic. Use title case. No quotes, no "
+                        "markdown, no punctuation at the end, no explanation. "
+                        "Never answer the message, only title it."
+                    ),
+                },
+                {"role": "user", "content": first_message[:500]},
+            ],
+            max_tokens=200,
+            temperature=0.2,
+        )
+        title = (response.choices[0].message.content or "").strip()
+        title = title.strip("\"'`*#. \n")
+        return title[:60] or None
+    except Exception as e:
+        print("TITLE ERROR:", repr(e))
+        return None
