@@ -4,7 +4,7 @@ import { use, useMemo, useState, useCallback, useRef } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Group, Panel } from "react-resizable-panels";
 import { sans, serif } from "@/app/config/font";
-import { Check, Copy, RefreshCw, Send, Sparkles } from "lucide-react";
+import { Check, Copy, Plus, RefreshCw, Send, Sparkles } from "lucide-react";
 import { Card, Handle, GithubMark } from "@/components/Panel";
 import { useAuth } from "@/context/AuthContext";
 import {
@@ -28,6 +28,7 @@ import { OpenedRepoRow } from "@/types/github";
 import BranchSelector from "@/components/workspace/BranchSelector";
 import RepositoryIndexPage from "@/components/repositoryProgress";
 import ChatHome from "@/components/chat/ChatHome";
+import { setChatParam } from "@/lib/chat/chatUrl";
 
 export default function RepoWorkspacePage({
     params,
@@ -54,7 +55,7 @@ export default function RepoWorkspacePage({
     );
     const [loginGit, setLoginGit] = useState(false);
     const hydratedKey = useRef<string | null>(null);
-    
+
 
     /* ---------- File Select Function ---------- */
 
@@ -193,10 +194,10 @@ export default function RepoWorkspacePage({
     });
 
     const repository = openedReposQuery.data?.find(
-    (repo) => repo.owner === owner && repo.name === repoName
-  );
+        (repo) => repo.owner === owner && repo.name === repoName
+    );
 
-  const repositoryId = repository?.id;
+    const repositoryId = repository?.id;
 
     /* ---------- Hydrate contents once per repo open ---------- */
     useEffect(() => {
@@ -422,8 +423,8 @@ export default function RepoWorkspacePage({
                         <RepositoryIndexPage
                             repoId={repositoryId}
                             branch={currentBranch}
-                        />               
-                             </span>
+                        />
+                    </span>
                 </div>
             </div>
 
@@ -592,11 +593,21 @@ export default function RepoWorkspacePage({
                         <Panel id="ai-chat" defaultSize={20} minSize={20}>
                             <Card
                                 title="Unravel Assistant"
-                                meta="Agentic Chat"
-                                action={<Sparkles className="h-4 w-4 text-[#F5A524]" />}
-                            >
+                                // meta="Agentic Chat"
+                                action={
+                                    <div className="flex items-center gap-2">
+                                        <button
+                                            onClick={() => setChatParam("new")}
+                                            className="flex items-center gap-1 rounded-md bg-[#F5A524] px-2 py-1 text-[11px] font-semibold text-[#17130D] transition hover:bg-[#FFB83F]"
+                                        >
+                                            <Plus size={12} />
+                                            New
+                                        </button>
+                                        {/* <Sparkles className="h-4 w-4 text-[#F5A524]" /> */}
+                                    </div>
+                                }                            >
 
-<ChatHome repoId={repositoryId} repoName={repoName} branch={currentBranch} />
+                                <ChatHome repoId={repositoryId} repoName={repoName} branch={currentBranch} />
                             </Card>
                         </Panel>
 

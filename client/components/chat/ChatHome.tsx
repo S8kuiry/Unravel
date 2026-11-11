@@ -5,7 +5,8 @@ import { useCallback, useState } from "react";
 
 import ConversationHome from "./ConversationHome";
 import ChatView from "./ChatView";
-
+import { useSearchParams } from "next/navigation";
+import { setChatParam } from "@/lib/chat/chatUrl";
 // ==========================================
 // TYPES
 // ==========================================
@@ -29,48 +30,27 @@ export default function ChatHome({
 }: ChatHomeProps) {
 
     // --------------------------------------
-    // Navigation State
+    // Navigation State (lives in the URL)
     // --------------------------------------
 
-    const [mode, setMode] = useState<ChatMode>("home");
+    const searchParams = useSearchParams();
 
-    const [activeConversationId, setActiveConversationId] =
-        useState<string | null>(null);
+    // null = home, "new" = blank chat, "<id>" = existing conversation
+    const chat = searchParams.get("chat");
+    const mode: ChatMode = chat ? "chat" : "home";
+    const activeConversationId = chat && chat !== "new" ? chat : null;
 
-    // --------------------------------------
-    // Start New Conversation
-    // --------------------------------------
+    const handleNewConversation = useCallback(() => setChatParam("new"), []);
+    const handleOpenConversation = useCallback((id: string) => setChatParam(id), []);
+    const handleBack = useCallback(() => setChatParam(null), []);
+    const handleConversationCreated = useCallback(
+        (id: string) => setChatParam(id, true),
+        []
+    );
 
-    const handleNewConversation = useCallback(() => {
-        setActiveConversationId(null);
-        setMode("chat");
-    }, []);
 
-    // --------------------------------------
-    // Open Existing Conversation
-    // --------------------------------------
 
-    const handleOpenConversation = useCallback((id: string) => {
-        setActiveConversationId(id);
-        setMode("chat");
-    }, []);
 
-    // --------------------------------------
-    // Return to Conversation Home
-    // --------------------------------------
-
-    const handleBack = useCallback(() => {
-        setMode("home");
-        setActiveConversationId(null);
-    }, []);
-
-    // --------------------------------------
-    // Handle First Message Conversation Creation
-    // --------------------------------------
-
-    const handleConversationCreated = useCallback((id: string) => {
-        setActiveConversationId(id);
-    }, []);
 
     // --------------------------------------
     // Repository Not Ready

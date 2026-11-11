@@ -26,7 +26,7 @@ import {
     deleteConversation,
 } from "@/api/conversation";
 
-import type { ConversationResponse } from "@/types/conversation";
+import type { ConversationListResponse, ConversationResponse } from "@/types/conversation";
 
 // ==========================================
 // TYPES
@@ -185,16 +185,30 @@ export default function ConversationHome({
             return deleteConversation(token, id);
         },
 
-        onSuccess: () => {
-            queryClient.invalidateQueries({ queryKey });
-            toast.success("Conversation deleted");
+        // Server confirmed: remove item and close modal in the same render
+        onSuccess: (_data, id) => {
+            queryClient.setQueryData<ConversationListResponse>(queryKey, (old) =>
+                old
+                    ? {
+                        ...old,
+                        conversations: old.conversations.filter(
+                            (c) => c.id !== id
+                        ),
+                        total: Math.max(0, old.total - 1),
+                    }
+                    : old
+            );
+
             setShowDeleteId(null);
+            queryClient.removeQueries({ queryKey: ["conversation", id] });
+            toast.success("Conversation deleted");
         },
 
         onError: (error: Error) => {
             toast.error(error.message || "Failed to delete conversation");
         },
     });
+
 
     // ======================================
     // RENDER
@@ -203,30 +217,10 @@ export default function ConversationHome({
     return (
         <div className="flex h-full min-h-0 flex-col text-[#E8E2D9]">
 
-            {/* Header */}
-            <div className="flex items-center justify-between border-b border-[#302B25] px-3 py-3">
 
-                <div className="min-w-0">
-                    <h3 className="text-sm font-semibold">
-                        Conversations
-                    </h3>
-
-                    <p className="mt-0.5 truncate text-[11px] text-[#8F877C]">
-                        {repoName}
-                    </p>
-                </div>
-
-                <button
-                    onClick={onNewConversation}
-                    className="flex shrink-0 items-center gap-1.5 rounded-md bg-[#F5A524] px-2.5 py-2 text-xs font-semibold text-[#17130D] transition hover:bg-[#FFB83F]"
-                >
-                    <Plus size={14} />
-                    New
-                </button>
-            </div>
 
             {/* Conversation List */}
-            <div className="min-h-0 flex-1 overflow-y-auto p-2">
+            <div className="min-h-0 flex-1 overflow-y-auto py-3 px-2">
 
                 {/* Loading */}
                 {isLoading && (
@@ -288,7 +282,7 @@ export default function ConversationHome({
                         {conversations.map((conversation) => (
                             <div
                                 key={conversation.id}
-                                className="group rounded-lg border border-transparent p-2.5 transition hover:border-[#393127] hover:bg-[#201C17]"
+                                className="cursor-pointer group rounded-lg border border-transparent p-2.5 transition border-[#393127] bg-[#201C17] hover:border-[#51402A] hover:bg-[#302820]"
                             >
 
                                 {editingId === conversation.id ? (
@@ -314,7 +308,7 @@ export default function ConversationHome({
                                             className="w-full rounded-md border border-[#51402A] bg-[#171410] px-2 py-1.5 text-xs text-[#E8E2D9] outline-none focus:border-[#F5A524]"
                                         />
 
-                                        <div className="flex justify-end gap-2">
+                                        <div className="cursor-pointer flex justify-end gap-2">
 
                                             <button
                                                 onClick={() => setEditingId(null)}
@@ -343,13 +337,13 @@ export default function ConversationHome({
                                 ) : (
 
                                     /* Normal Mode */
-                                    <div className="flex items-start gap-2">
+                                    <div className="cursor-pointer flex items-start gap-2">
 
                                         <button
                                             onClick={() =>
                                                 onOpenConversation(conversation.id)
                                             }
-                                            className="min-w-0 flex-1 text-left"
+                                            className="cursor-pointer  min-w-0 flex-1 text-left"
                                         >
                                             <div className="flex items-center gap-2">
                                                 <MessageSquare
@@ -368,14 +362,14 @@ export default function ConversationHome({
                                         </button>
 
                                         {/* Actions */}
-                                        <div className="flex shrink-0 items-center gap-1 opacity-100 transition sm:opacity-0 sm:group-hover:opacity-100">
+                                        <div className="cursor-pointer flex shrink-0 items-center gap-1 opacity-100 transition sm:opacity-0 sm:group-hover:opacity-100">
 
                                             <button
                                                 onClick={() => {
                                                     setEditingId(conversation.id);
                                                     setEditingTitle(conversation.title || "");
                                                 }}
-                                                className="rounded p-1.5 text-[#827A70] hover:bg-[#342C22] hover:text-[#F5A524]"
+                                                className="cursor-pointer rounded p-1.5 text-[#827A70] hover:bg-[#342C22] hover:text-[#F5A524]"
                                                 title="Rename"
                                             >
                                                 <Pencil size={13} />
@@ -389,7 +383,7 @@ export default function ConversationHome({
                                                             : conversation.id
                                                     )
                                                 }
-                                                className="rounded p-1.5 text-[#827A70] hover:bg-[#34221F] hover:text-red-400"
+                                                className="cursor-pointer rounded p-1.5 text-[#827A70] hover:bg-[#34221F] hover:text-red-400"
                                                 title="Delete"
                                             >
                                                 <Trash2 size={13} />
@@ -423,9 +417,13 @@ export default function ConversationHome({
                                                 disabled={deleteMutation.isPending}
                                                 className="rounded bg-red-500/15 px-2 py-1 text-[10px] text-red-400 hover:bg-red-500/25 disabled:opacity-50"
                                             >
-                                                {deleteMutation.isPending
-                                                    ? "Deleting..."
-                                                    : "Delete"}
+                                                {deleteMutation.isPending ? (
+                                                    <>
+                                                        <Loader2 size={12} className="animate-spin" />
+                                                    </>
+                                                ) : (
+                                                    "Delete"
+                                                )}
                                             </button>
 
                                         </div>
