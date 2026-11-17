@@ -1,9 +1,14 @@
 
 import logging
 import inngest
+import os
+from dotenv import load_dotenv
+load_dotenv()
 
 inngest_client = inngest.Inngest(
     app_id="repo-intelligence",
+    event_key=os.getenv("INNGEST_EVENT_KEY"),
+    signing_key=os.getenv("INNGEST_SIGNING_KEY"),
     logger=logging.getLogger("uvicorn"),
 )
 

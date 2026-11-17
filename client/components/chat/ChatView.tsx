@@ -60,6 +60,7 @@ function makeTitle(text: string, limit = 50) {
 // ==========================================
 
 
+const MAX_CONTEXT_MESSAGES = 6; // change to 10 or whatever limit you want
 
 export default function ChatView({
     repoId,
@@ -106,7 +107,7 @@ export default function ChatView({
     // SEND MESSAGE
     // ======================================
 
-       const generateTitle = useMutation({
+    const generateTitle = useMutation({
         mutationFn: async ({
             conversationId,
             content,
@@ -146,7 +147,7 @@ export default function ChatView({
         },
 
         // Fallback title stays; nothing to show the user
-        onError: () => {},
+        onError: () => { },
     });
 
 
@@ -192,6 +193,19 @@ export default function ChatView({
 
             const key = ["conversation", activeId];
 
+            // 1. Grab existing messages BEFORE adding the new optimistic message
+            const existingData = queryClient.getQueryData<ConversationDetailResponse>(key);
+            const oldMessages = existingData?.messages ?? [];
+
+            // 2. Limit to a specified number of old messages
+            const context = oldMessages
+                .filter((m) => (m as any).status !== "error" && m.content && m.content.trim() !== "") // safely check status if present
+                .slice(-MAX_CONTEXT_MESSAGES)
+                .map((m) => ({
+                    role: m.role,
+                    content: m.content,
+                }));
+
             // 1. Optimistic messages go into the cache
             queryClient.setQueryData<ConversationDetailResponse>(key, (old) => ({
                 ...old!,
@@ -212,8 +226,9 @@ export default function ChatView({
             if (activeId !== conversationId) onConversationCreated(activeId);
 
             // 3. Get the reply
+
             const response = await sendConversationMessage(token, activeId, {
-                content, branch, role: "user",
+                content, branch, role: "user",context
             });
 
             // 4. Replace the pending agent message in place
