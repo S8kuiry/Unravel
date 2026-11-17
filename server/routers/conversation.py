@@ -15,7 +15,7 @@ from models.conversation import (
     ConversationRenameRequest,
     ConversationTitleRequest,
     MessageCreateRequest,
-    MessageResponse,
+    MessageResponse,Message
 )
 from crud.conversation import (
     create_conversation,
@@ -31,6 +31,7 @@ from services.agent.groq_client import generate_title
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/conversations", tags=["conversations"])
 
+MAX_CONTEXT_MESSAGES = 6
 
 # create conversation
 @router.post("/", response_model=ConversationResponse)
@@ -170,7 +171,7 @@ async def update_conversation_title(
     )
 
 
-# create  a message in a conversation
+# cre
 @router.post(
     "/{conversation_id}/messages",
     response_model=MessageResponse,
@@ -181,6 +182,7 @@ async def send_user_message(
     uid: str = Depends(get_current_uid),
     db: AsyncSession = Depends(get_db),
 ):
+    # 1. Get conversation
     conversation = await get_conversation_by_id(
         db=db,
         conversation_id=conversation_id,
@@ -189,6 +191,7 @@ async def send_user_message(
     if conversation is None:
         raise HTTPException(404, "Conversation not found")
 
+    # 2. Verify conversation ownership
     statement = select(Repository).where(
         Repository.id == conversation.repo_id,
         Repository.user_uid == uid,
@@ -199,7 +202,31 @@ async def send_user_message(
     if result.scalar_one_or_none() is None:
         raise HTTPException(404, "Conversation not found")
 
-    # 1. Save the user's message
+    # 3. Fetch previous conversation messages
+    statement = (
+        select(Message)
+        .where(Message.conversation_id == conversation_id)
+        .order_by(
+            Message.created_at.desc(),
+            Message.id.desc(),
+        )
+        .limit(MAX_CONTEXT_MESSAGES)
+    )
+
+    result = await db.execute(statement)
+    previous_messages = list(reversed(result.scalars().all()))
+
+    # 4. Convert database messages into LLM context
+    context = [
+        {
+            "role": "user" if msg.role == "user" else "assistant",
+            "content": msg.content,
+        }
+        for msg in previous_messages
+        if msg.role in ("user", "agent") and msg.content
+    ]
+
+    # 5. Save current user message
     await create_message(
         db=db,
         conversation=conversation,
@@ -207,16 +234,16 @@ async def send_user_message(
         role="user",
     )
 
-    # 2. Generate the agent's response
+    # 6. Generate agent response using conversation history
     answer = await run_agent(
         message=request.content,
         db=db,
         repo_id=conversation.repo_id,
         branch=request.branch,
-        context=request.context,
+        context=context,
     )
 
-    # 3. Save the agent's response
+    # 7. Save agent response
     agent_message = await create_message(
         db=db,
         conversation=conversation,
@@ -224,9 +251,8 @@ async def send_user_message(
         role="agent",
     )
 
-    # 4. Return the agent's response
+    # 8. Return agent response
     return agent_message
-
 
 
 # generate an AI title from the first user message

@@ -193,18 +193,7 @@ export default function ChatView({
 
             const key = ["conversation", activeId];
 
-            // 1. Grab existing messages BEFORE adding the new optimistic message
-            const existingData = queryClient.getQueryData<ConversationDetailResponse>(key);
-            const oldMessages = existingData?.messages ?? [];
-
-            // 2. Limit to a specified number of old messages
-            const context = oldMessages
-                .filter((m) => (m as any).status !== "error" && m.content && m.content.trim() !== "") // safely check status if present
-                .slice(-MAX_CONTEXT_MESSAGES)
-                .map((m) => ({
-                    role: m.role,
-                    content: m.content,
-                }));
+            
 
             // 1. Optimistic messages go into the cache
             queryClient.setQueryData<ConversationDetailResponse>(key, (old) => ({
@@ -226,9 +215,10 @@ export default function ChatView({
             if (activeId !== conversationId) onConversationCreated(activeId);
 
             // 3. Get the reply
+            console.log(context)
 
             const response = await sendConversationMessage(token, activeId, {
-                content, branch, role: "user",context
+                content, branch, role: "user", 
             });
 
             // 4. Replace the pending agent message in place
