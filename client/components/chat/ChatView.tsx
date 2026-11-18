@@ -215,7 +215,6 @@ export default function ChatView({
             if (activeId !== conversationId) onConversationCreated(activeId);
 
             // 3. Get the reply
-            console.log(context)
 
             const response = await sendConversationMessage(token, activeId, {
                 content, branch, role: "user", 
