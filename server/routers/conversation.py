@@ -3,7 +3,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Query
 from models.github import Repository
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, delete, or_
+from sqlalchemy import select, delete as sql_delete , or_
 from db.database import get_db
 from security.auth import get_current_uid
 import logging
@@ -171,7 +171,7 @@ async def update_conversation_title(
     )
 
 
-# cre
+# send message 
 @router.post(
     "/{conversation_id}/messages",
     response_model=MessageResponse,
@@ -216,7 +216,6 @@ async def send_user_message(
     result = await db.execute(statement)
     previous_messages = list(reversed(result.scalars().all()))
 
-    # 4. Convert database messages into LLM context
     context = [
         {
             "role": "user" if msg.role == "user" else "assistant",
@@ -226,34 +225,61 @@ async def send_user_message(
         if msg.role in ("user", "agent") and msg.content
     ]
 
-    # 5. Save current user message
-    await create_message(
+    # 4. Save current user message
+    user_message = await create_message(
         db=db,
         conversation=conversation,
         content=request.content,
         role="user",
     )
 
-    # 6. Generate agent response using conversation history
-    answer = await run_agent(
-        message=request.content,
-        db=db,
-        repo_id=conversation.repo_id,
-        branch=request.branch,
-        context=context,
-    )
+    user_message_id = user_message.id
 
-    # 7. Save agent response
-    agent_message = await create_message(
-        db=db,
-        conversation=conversation,
-        content=answer,
-        role="agent",
-    )
+    try:
+        # 5. Generate agent response
+        answer = await run_agent(
+            message=request.content,
+            db=db,
+            repo_id=conversation.repo_id,
+            branch=request.branch,
+            context=context,
+        )
 
-    # 8. Return agent response
-    return agent_message
+        # 6. Save agent response
+        agent_message = await create_message(
+            db=db,
+            conversation=conversation,
+            content=answer,
+            role="agent",
+        )
 
+        return agent_message
+
+    except Exception as e:
+        # 7. Roll back any failed database transaction
+        await db.rollback()
+
+        # 8. Delete ONLY this request's user message
+        await db.execute(
+            sql_delete(Message).where(
+                Message.id == user_message_id,
+                Message.conversation_id == conversation_id,
+            )
+        )
+
+        await db.commit()
+
+        logger.exception(
+            "Failed to process message %s",
+            user_message_id,
+        )
+
+        raise HTTPException(
+            status_code=502,
+            detail="Failed to generate response. Your message was not saved.",
+        ) from e
+
+    
 
 # generate an AI title from the first user message
 @router.post("/{conversation_id}/title", response_model=ConversationResponse)
