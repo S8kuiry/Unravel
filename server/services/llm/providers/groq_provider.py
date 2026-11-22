@@ -1,14 +1,17 @@
-
 import os
 import asyncio
+
 from itertools import cycle
-from typing import Any
+from typing import Any, AsyncGenerator
+
 from groq import AsyncGroq
-from services.llm.config import LLMConfig
-from prompts.title_prompts import TITLE_SYSTEM_PROMPT
 from dotenv import load_dotenv
 
+from services.llm.config import LLMConfig
+from prompts.title_prompts import TITLE_SYSTEM_PROMPT
+
 load_dotenv()
+
 
 class GroqProvider:
     """Handles Groq API operations and API key rotation."""
@@ -91,6 +94,76 @@ class GroqProvider:
         )
 
         return response.choices[0].message
+
+    async def generate_stream(
+        self,
+        messages: list[Any],
+        model: str | None = None,
+        tools: list[Any] | None = None,
+        tool_choice: str | None = None,
+        **kwargs: Any,
+    ) -> AsyncGenerator[Any, None]:
+        """Stream text and tool-call chunks from Groq."""
+
+        client = await self.get_client()
+
+        request_args = {
+            "model": model or self.chat_model,
+            "messages": messages,
+            "temperature": 0.2,
+            "max_tokens": 4096,
+            **kwargs,
+            "stream": True,
+        }
+
+        if tools:
+            request_args["tools"] = tools
+            request_args["tool_choice"] = tool_choice or "auto"
+
+        stream = await client.chat.completions.create(
+            **request_args
+        )
+
+        async for chunk in stream:
+            if not chunk.choices:
+                continue
+
+            delta = chunk.choices[0].delta
+
+            # Stream text content.
+            if delta.content:
+                yield {
+                    "type": "content",
+                    "content": delta.content,
+                }
+
+            # Stream tool-call information.
+            if delta.tool_calls:
+                for tool_call in delta.tool_calls:
+                    yield {
+                        "type": "tool_call",
+                        "index": tool_call.index,
+                        "id": tool_call.id,
+                        "name": (
+                            tool_call.function.name
+                            if tool_call.function
+                            else None
+                        ),
+                        "arguments": (
+                            tool_call.function.arguments
+                            if tool_call.function
+                            else None
+                        ),
+                    }
+
+            # Stream completion information.
+            finish_reason = chunk.choices[0].finish_reason
+
+            if finish_reason:
+                yield {
+                    "type": "finish",
+                    "reason": finish_reason,
+                }
 
     async def generate_title(
         self,

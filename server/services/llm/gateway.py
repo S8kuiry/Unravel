@@ -1,5 +1,5 @@
 
-from typing import Any
+from typing import Any,AsyncGenerator
 
 from services.llm.config import LLMConfig, get_llm_config
 from services.llm.providers.groq_provider import GroqProvider
@@ -36,6 +36,28 @@ class LLMGateway:
             tool_choice=tool_choice,
             **kwargs,
         )
+    
+
+    async def generate_stream(
+    self,
+    messages: list[Any],
+    model: str | None = None,
+    tools: list[Any] | None = None,
+    tool_choice: str | None = None,
+    **kwargs: Any,
+    ) -> AsyncGenerator[dict[str, Any], None]:
+        """Forward streaming chat completions to the active provider."""
+        async for chunk in self.provider.generate_stream(
+        messages=messages,
+        model=model,
+        tools=tools,
+        tool_choice=tool_choice,
+        **kwargs,
+        ):
+            
+            yield chunk
+            
+
 
     async def generate_title(
         self,
