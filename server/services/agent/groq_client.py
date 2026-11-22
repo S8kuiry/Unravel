@@ -27,6 +27,7 @@ async def get_groq_client():
     async with client_lock:
         return next(client_cycle)
 
+
 async def generate_response(
     messages: list,
     tools: list | None = None,
@@ -34,20 +35,21 @@ async def generate_response(
 ):
     client = await get_groq_client()
 
-    # Explicitly determine tool choice
-    if tool_choice is not None:
-        resolved_tool_choice = tool_choice
-    else:
-        resolved_tool_choice = "auto" if tools else "none"
+    request_args = {
+        "model": os.getenv("CHAT_MODEL", "openai/gpt-oss-120b"),
+        "messages": messages,
+    }
 
-    response = await client.chat.completions.create(
-        model=os.getenv("CHAT_MODEL", "openai/gpt-oss-120b"),
-        messages=messages,
-        tools=tools,
-        tool_choice=resolved_tool_choice,
-    )
+    # Only include tool configuration when tools are provided.
+    if tools:
+        request_args["tools"] = tools
+        request_args["tool_choice"] = tool_choice or "auto"
+
+    # If tools=None, neither tools nor tool_choice is sent.
+    response = await client.chat.completions.create(**request_args)
 
     return response.choices[0].message
+
 
 
 

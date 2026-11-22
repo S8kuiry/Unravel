@@ -84,18 +84,16 @@ async def run_agent(
     else:
         raise ValueError(f"Unsupported tool: {tool_name}")
 
-    # Add Groq's tool-call message to conversation.
-    # Strip tool_calls so the assistant message is text-only.
+   # Preserve the assistant's original tool-call message.
     assistant_msg = response.model_dump(exclude_none=True)
-    assistant_msg.pop("tool_calls", None)
     messages.append(assistant_msg)
 
-    # Send the tool result back as text in a user message.
-    # Using 'user' role (instead of 'tool') avoids Groq Harmony's
-    # strict tool-naming requirements for the 'tool' role.
+# Connect the tool result to the exact tool call.
     messages.append({
-        "role": "user",
-        "content": f"Tool results from search_repository:\n{json.dumps(results)}\n\nPlease answer the user's question based on these results.",
+    "role": "tool",
+    "tool_call_id": tool_call.id,
+    "name": tool_name,
+    "content": json.dumps(results),
     })
 
     # 5. Ask Groq to generate the final answer (no tools, text only).
