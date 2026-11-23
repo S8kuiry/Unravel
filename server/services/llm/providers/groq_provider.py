@@ -8,7 +8,7 @@ from groq import AsyncGroq
 from dotenv import load_dotenv
 
 from services.llm.config import LLMConfig
-from prompts.title_prompts import TITLE_SYSTEM_PROMPT
+from server.prompts.agent_prompts import TITLE_SYSTEM_PROMPT,AGENT_SYSTEM_PROMPT
 
 load_dotenv()
 
@@ -64,6 +64,7 @@ class GroqProvider:
 
         async with self.client_lock:
             return next(self.client_cycle)
+        
 
     async def generate(
         self,
@@ -76,6 +77,15 @@ class GroqProvider:
         """Generate a chat completion."""
 
         client = await self.get_client()
+
+        if not messages or messages[0].get("role") != "system":
+            messages = [
+            {
+            "role": "system",
+            "content": AGENT_SYSTEM_PROMPT,
+            },
+            *messages,
+            ]
 
         request_args = {
             "model": model or self.chat_model,
@@ -95,6 +105,8 @@ class GroqProvider:
 
         return response.choices[0].message
 
+    
+
     async def generate_stream(
         self,
         messages: list[Any],
@@ -106,6 +118,14 @@ class GroqProvider:
         """Stream text and tool-call chunks from Groq."""
 
         client = await self.get_client()
+        if not messages or messages[0].get("role") != "system":
+            messages = [
+            {
+            "role": "system",
+            "content": AGENT_SYSTEM_PROMPT,
+            },
+            *messages,
+            ]
 
         request_args = {
             "model": model or self.chat_model,

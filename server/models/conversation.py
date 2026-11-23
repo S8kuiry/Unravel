@@ -41,6 +41,9 @@ class Conversation(Base):
 
     title = Column(String(200), nullable=True)
 
+    summary = Column(Text, nullable=True)
+    summary_message_count = Column(Integer, nullable=False, default=0)
+
     created_at = Column(
         DateTime(timezone=True),
         nullable=False,

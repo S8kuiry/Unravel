@@ -98,16 +98,27 @@ async def conversation_websocket(
                     },
                 })
 
-                # 3. Generate agent response
-                answer = await run_agent(
+                # 3. Generate agent response and stream events
+                answer_parts = []
+
+                async for event in run_agent(
                     message=message,
                     db=db,
                     repo_id=conversation.repo_id,
                     branch=branch,
                     context=context,
-                )
+                ):
+                    # Forward status and token events to the frontend
+                    await websocket.send_json(event)
 
-                # 4. Save agent response
+                    # Collect tokens to build the complete answer
+                    if event["type"] == "agent_token":
+                        answer_parts.append(event["content"])
+
+                # 4. Combine all streamed tokens
+                answer = "".join(answer_parts)
+
+                # 5. Save the complete agent response
                 agent_message = await create_message(
                     db=db,
                     conversation=conversation,
@@ -115,7 +126,7 @@ async def conversation_websocket(
                     role="agent",
                 )
 
-                # 5. Return saved agent message
+                # 6. Return the saved agent message
                 await websocket.send_json({
                     "type": "agent_message_saved",
                     "message": {

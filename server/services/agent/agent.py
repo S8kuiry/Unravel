@@ -1,11 +1,15 @@
+
 import json
 
-from sqlalchemy.ext.asyncio import AsyncSession
 from uuid import UUID
-
-from services.agent.groq_client import generate_response
+from typing import AsyncGenerator
+from sqlalchemy.ext.asyncio import AsyncSession
+from services.llm.gateway import LLMGateway
 from tools.definitions import AVAILABLE_TOOLS
 from tools.repository_tools import search_repository
+
+# Initialize the gateway once, not on every user request.
+llm = LLMGateway()
 
 
 async def run_agent(
@@ -13,93 +17,156 @@ async def run_agent(
     db: AsyncSession,
     repo_id: UUID,
     branch: str,
-    context: list | None = None
-) -> str:
+    context: list | None = None,
+) -> AsyncGenerator[dict, None]:
 
-    # 1. System Prompt always comes first
-    messages = [
-        {
-            "role": "system",
-            "content": """
-            You are UNRAVEL, an AI repository assistant.
+    # 1. Prepare conversation messages.
+    # The provider adds AGENT_SYSTEM_PROMPT automatically.
+    messages = []
 
-            You can answer general questions naturally.
-
-            When a question requires information from the
-            user's repository, use the search_repository tool.
-
-            Only make one tool call at a time.
-            Do not invent repository information.
-            """
-        }
-    ]
-
-    # 2. Append past conversation history (context) if provided
-    # 2. Append past conversation history (context) safely
     if context:
         for msg in context:
             role = msg.get("role")
             content = msg.get("content")
-            
-            # Only allow standard roles with actual text to prevent 400 schema errors
+
             if role in ("user", "assistant") and content:
                 messages.append({
                     "role": role,
-                    "content": content
+                    "content": content,
                 })
-    # 3. Append the current user message
+
     messages.append({
         "role": "user",
         "content": message,
     })
 
-    # 4. Ask Groq what to do
-    response = await generate_response(
+    # 2. Request the initial streamed response.
+    yield {
+        "type": "agent_status",
+        "status": "thinking",
+    }
+
+    tool_calls = {}
+    assistant_content = ""
+
+    async for chunk in llm.generate_stream(
         messages=messages,
         tools=AVAILABLE_TOOLS,
-    )
+    ):
 
-    # No tool requested: return natural answer
-    if not response.tool_calls:
-        return response.content or ""
+        if chunk["type"] == "content":
+            content = chunk["content"]
+            assistant_content += content
 
-    # Get the requested tool
-    tool_call = response.tool_calls[0]
-    tool_name = tool_call.function.name
-    arguments = json.loads(tool_call.function.arguments)
+            yield {
+                "type": "agent_token",
+                "content": content,
+            }
 
-    # Execute only tools explicitly allowed by our backend
-    if tool_name == "search_repository":
-        query = arguments.get("query")
+        elif chunk["type"] == "tool_call":
+            index = chunk["index"]
 
-        if not isinstance(query, str) or not query.strip():
-            raise ValueError("Invalid repository search query")
+            if index not in tool_calls:
+                tool_calls[index] = {
+                    "id": "",
+                    "type": "function",
+                    "function": {
+                        "name": "",
+                        "arguments": "",
+                    },
+                }
 
-        results = await search_repository(
-            db=db,
-            repo_id=repo_id,
-            branch=branch,
-            query=query,
-        )
-    else:
-        raise ValueError(f"Unsupported tool: {tool_name}")
+            call = tool_calls[index]
 
-   # Preserve the assistant's original tool-call message.
-    assistant_msg = response.model_dump(exclude_none=True)
-    messages.append(assistant_msg)
+            if chunk.get("id"):
+                call["id"] = chunk["id"]
 
-# Connect the tool result to the exact tool call.
-    messages.append({
-    "role": "tool",
-    "tool_call_id": tool_call.id,
-    "name": tool_name,
-    "content": json.dumps(results),
-    })
+            if chunk.get("name"):
+                call["function"]["name"] += chunk["name"]
 
-    # 5. Ask Groq to generate the final answer (no tools, text only).
-    final_response = await generate_response(
+            if chunk.get("arguments"):
+                call["function"]["arguments"] += chunk["arguments"]
+
+    # 3. No tool requested: the streamed answer is complete.
+    if not tool_calls:
+        return
+
+    # 4. Reconstruct the complete assistant tool-call message.
+    ordered_calls = [
+        tool_calls[index]
+        for index in sorted(tool_calls)
+    ]
+
+    assistant_message = {
+        "role": "assistant",
+        "content": assistant_content or None,
+        "tool_calls": ordered_calls,
+    }
+
+    messages.append(assistant_message)
+
+    # 5. Execute the requested tools sequentially.
+    for tool_call in ordered_calls:
+
+        tool_name = tool_call["function"]["name"]
+
+        try:
+            arguments = json.loads(
+                tool_call["function"]["arguments"]
+            )
+        except json.JSONDecodeError as exc:
+            raise ValueError(
+                f"Invalid arguments for tool: {tool_name}"
+            ) from exc
+
+        yield {
+            "type": "agent_status",
+            "status": "executing_tool",
+            "tool": tool_name,
+        }
+
+        if tool_name == "search_repository":
+
+            query = arguments.get("query")
+
+            if not isinstance(query, str) or not query.strip():
+                raise ValueError(
+                    "Invalid repository search query"
+                )
+
+            results = await search_repository(
+                db=db,
+                repo_id=repo_id,
+                branch=branch,
+                query=query,
+            )
+
+        else:
+            raise ValueError(
+                f"Unsupported tool: {tool_name}"
+            )
+
+        # 6. Connect the result to its exact tool call.
+        messages.append({
+            "role": "tool",
+            "tool_call_id": tool_call["id"],
+            "name": tool_name,
+            "content": json.dumps(results, default=str),
+        })
+
+    # 7. Generate and stream the final answer.
+    yield {
+        "type": "agent_status",
+        "status": "generating_answer",
+    }
+
+    async for chunk in llm.generate_stream(
         messages=messages,
         tools=None,
-    )
+    ):
 
-    return final_response.content or ""
+        if chunk["type"] == "content":
+            yield {
+                "type": "agent_token",
+                "content": chunk["content"],
+            }
