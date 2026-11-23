@@ -1,5 +1,4 @@
 import json
-import re
 from typing import AsyncGenerator
 from uuid import UUID
 
@@ -11,154 +10,87 @@ from tools.definitions import AVAILABLE_TOOLS
 from tools.repository_tools import search_repository
 
 llm = LLMGateway()
-
-_REPOSITORY_SEARCH_SIGNALS = (
-    r"\b(?:this|the|my|our|current|selected)\s+(?:repo(?:sitory)?|project|codebase|app(?:lication)?)\b",
-    r"\b(?:in|from|within|inside)\s+(?:the\s+)?(?:repo(?:sitory)?|project|codebase|code)\b",
-    r"\b(?:search|find|locate|look\s+up|show\s+me|trace|inspect)\b.*\b(?:repo(?:sitory)?|code|file|implementation|function|class|module|endpoint)\b",
-    r"\b(?:where|which\s+file|what\s+file)\b.*\b(?:implemented|defined|configured|handled|wired|used)\b",
-    r"\b(?:file|function|class|method|module|component|endpoint|route|handler|service|schema|model)\s+(?:named|called|defined|implemented)\b",
-    r"\b(?:src|app|server|client|lib|components?)/[\w./-]+",
-    r"\b[\w.-]+\.(?:py|ts|tsx|js|jsx|go|rs|java|rb|php|cs|cpp|c|sql|json|ya?ml|toml|md)\b",
-)
-
 MAX_TOOL_ITERATIONS = 3
 
 
-def _requires_repository_search(message: str) -> bool:
-    normalized = " ".join(message.lower().split())
-    return any(re.search(signal, normalized) for signal in _REPOSITORY_SEARCH_SIGNALS)
+def _is_tool_choice_none_error(exc: GroqAPIError) -> bool:
+    combined = f"{exc} {getattr(exc, 'body', '')}".lower()
+    return "tool choice is none" in combined
+
+
+async def _force_direct_answer(messages: list[dict]) -> str:
+    """Ask the model to answer directly from existing context without calling tools."""
+    nudge_messages = [
+        *messages,
+        {
+            "role": "user",
+            "content": (
+                "Do not call any tools. Answer directly now using only the "
+                "information and context already available."
+            ),
+        },
+    ]
+    text = ""
+    async for chunk in llm.generate_stream(messages=nudge_messages, tools=None):
+        if chunk["type"] == "content":
+            text += chunk["content"]
+    return text.strip()
 
 
 async def _collect_turn(
     messages: list[dict],
     tools: list | None,
-    tool_choice: str | None = None,
+    *,
+    _retried: bool = False,
 ) -> tuple[str, list[dict]]:
-    """Run one streamed LLM turn without leaking tokens from tool-calling turns."""
-    assistant_content = ""
-    tool_calls_map: dict[int, dict] = {}
-
+    text = ""
+    calls: dict[int, dict] = {}
     kwargs: dict = {"messages": messages}
     if tools:
         kwargs["tools"] = tools
-        if tool_choice is not None:
-            kwargs["tool_choice"] = tool_choice
+        kwargs["tool_choice"] = "auto"
 
-    async for chunk in llm.generate_stream(**kwargs):
-        if chunk["type"] == "content":
-            assistant_content += chunk["content"]
-        elif chunk["type"] == "tool_call":
-            idx = chunk["index"]
-            if idx not in tool_calls_map:
-                tool_calls_map[idx] = {
-                    "id": "",
-                    "type": "function",
-                    "function": {"name": "", "arguments": ""},
-                }
-            call = tool_calls_map[idx]
-            if chunk.get("id"):
-                call["id"] = chunk["id"]
-            if chunk.get("name"):
-                call["function"]["name"] += chunk["name"]
-            if chunk.get("arguments"):
-                call["function"]["arguments"] += chunk["arguments"]
-
-    ordered_calls = [tool_calls_map[i] for i in sorted(tool_calls_map)]
-    return assistant_content, ordered_calls
-
-
-async def _collect_turn_safe(
-    messages: list[dict],
-    tools: list | None,
-    tool_choice: str | None = None,
-) -> tuple[str, list[dict], bool]:
-    """
-    Collect a turn safely. If Groq raises 'Tool choice is none, but model called a tool'
-    when tools were disabled, re-run with tools enabled so any tool call can be handled
-    gracefully instead of crashing the stream.
-
-    Returns (content, ordered_calls, recovered_with_tools).
-    """
     try:
-        content, ordered_calls = await _collect_turn(
-            messages=messages,
-            tools=tools,
-            tool_choice=tool_choice,
-        )
-        return content, ordered_calls, False
-    except GroqAPIError as exc:
-        if "Tool choice is none" not in str(exc) or not AVAILABLE_TOOLS:
-            raise
-
-        fallback_messages = [
-            *messages,
-            {
-                "role": "user",
-                "content": (
-                    "Provide your final answer now using the repository context already gathered. "
-                    "Only call search_repository if essential to answer accurately."
-                ),
-            },
-        ]
-        content, ordered_calls = await _collect_turn(
-            messages=fallback_messages,
-            tools=AVAILABLE_TOOLS,
-            tool_choice="auto",
-        )
-        return content, ordered_calls, True
-
-
-async def _run_tools(
-    ordered_calls: list[dict],
-    messages: list[dict],
-    db: AsyncSession,
-    repo_id: UUID,
-    branch: str,
-) -> AsyncGenerator[dict, None]:
-    messages.append({
-        "role": "assistant",
-        "content": None,
-        "tool_calls": ordered_calls,
-    })
-
-    for tool_call in ordered_calls:
-        tool_name = tool_call["function"]["name"]
-        raw_args = tool_call["function"]["arguments"] or "{}"
-
-        try:
-            arguments = json.loads(raw_args)
-        except json.JSONDecodeError as exc:
-            raise ValueError(f"Invalid arguments for tool: {tool_name}") from exc
-
-        yield {
-            "type": "agent_status",
-            "status": "executing_tool",
-            "tool": tool_name,
-        }
-
-        if tool_name == "search_repository":
-            query = arguments.get("query")
-            if not isinstance(query, str) or not query.strip():
-                results = {
-                    "error": "Invalid repository search query. Please provide a valid search term."
-                }
-            else:
-                results = await search_repository(
-                    db=db,
-                    repo_id=repo_id,
-                    branch=branch,
-                    query=query,
+        async for chunk in llm.generate_stream(**kwargs):
+            if chunk["type"] == "content":
+                text += chunk["content"]
+            elif chunk["type"] == "tool_call":
+                c = calls.setdefault(
+                    chunk["index"],
+                    {"id": "", "type": "function", "function": {"name": "", "arguments": ""}},
                 )
-        else:
-            raise ValueError(f"Unsupported tool: {tool_name}")
+                if chunk.get("id"):
+                    c["id"] = chunk["id"]
+                if chunk.get("name"):
+                    c["function"]["name"] += chunk["name"]
+                if chunk.get("arguments"):
+                    c["function"]["arguments"] += chunk["arguments"]
+    except GroqAPIError as exc:
+        if _is_tool_choice_none_error(exc) and not _retried and AVAILABLE_TOOLS:
+            return await _collect_turn(messages, AVAILABLE_TOOLS, _retried=True)
+        if _is_tool_choice_none_error(exc):
+            forced = await _force_direct_answer(messages)
+            return forced, []
+        raise
 
-        messages.append({
-            "role": "tool",
-            "tool_call_id": tool_call["id"],
-            "name": tool_name,
-            "content": json.dumps(results, default=str),
-        })
+    return text, [calls[i] for i in sorted(calls)]
+
+
+async def _call_tool(name: str, raw_args: str, db: AsyncSession, repo_id: UUID, branch: str) -> str:
+    try:
+        args = json.loads(raw_args or "{}")
+    except json.JSONDecodeError:
+        return json.dumps({"error": f"Invalid arguments for {name}"})
+
+    # Add future tools as elif branches here.
+    if name == "search_repository":
+        query = (args.get("query") or "").strip()
+        if not query:
+            return json.dumps({"error": "Empty search query"})
+        res = await search_repository(db=db, repo_id=repo_id, branch=branch, query=query)
+        return json.dumps(res, default=str)
+
+    raise ValueError(f"Unsupported tool: {name}")
 
 
 async def run_agent(
@@ -168,45 +100,47 @@ async def run_agent(
     branch: str,
     context: list | None = None,
 ) -> AsyncGenerator[dict, None]:
-    messages: list[dict] = []
-
-    if context:
-        for msg in context:
-            role = msg.get("role")
-            content = msg.get("content")
-            if role in ("user", "assistant") and content:
-                messages.append({"role": role, "content": content})
-
+    messages = [
+        {"role": m["role"], "content": m["content"]}
+        for m in (context or [])
+        if m.get("role") in ("user", "assistant") and m.get("content")
+    ]
     messages.append({"role": "user", "content": message})
+
+    tools = AVAILABLE_TOOLS or None
+    answer = ""
 
     yield {"type": "agent_status", "status": "thinking"}
 
-    repository_tools = AVAILABLE_TOOLS if _requires_repository_search(message) else None
-    iterations = 0
-    final_answer = ""
+    for _ in range(MAX_TOOL_ITERATIONS):
+        text, tool_calls = await _collect_turn(messages, tools)
+        if not tool_calls:
+            answer = text.strip()
+            break
 
-    while True:
-        can_call_tools = repository_tools is not None and iterations < MAX_TOOL_ITERATIONS
-        content, ordered_calls, recovered = await _collect_turn_safe(
-            messages=messages,
-            tools=repository_tools if can_call_tools else None,
-            tool_choice="auto" if can_call_tools else None,
-        )
+        messages.append({"role": "assistant", "content": None, "tool_calls": tool_calls})
+        for call in tool_calls:
+            name = call["function"]["name"]
+            yield {"type": "agent_status", "status": "executing_tool", "tool": name}
+            output = await _call_tool(name, call["function"]["arguments"], db, repo_id, branch)
+            messages.append({
+                "role": "tool",
+                "tool_call_id": call["id"],
+                "name": name,
+                "content": output,
+            })
+        yield {"type": "agent_status", "status": "generating_answer"}
 
-        # Allow tool execution during normal iterations, or once if recovering from
-        # a 'Tool choice is none' error so tool_call_ids aren't left dangling.
-        if ordered_calls and (can_call_tools or recovered):
-            iterations += 1
-            async for event in _run_tools(ordered_calls, messages, db, repo_id, branch):
-                yield event
-            yield {"type": "agent_status", "status": "generating_answer"}
-            continue
+    if not answer:
+        try:
+            answer = await _force_direct_answer(messages)
+        except GroqAPIError as exc:
+            if not _is_tool_choice_none_error(exc):
+                raise
+            answer = ""
 
-        final_answer = content.strip()
-        break
-
-    if not final_answer:
+    if not answer:
         raise RuntimeError("Agent completed without a non-empty answer")
 
-    yield {"type": "agent_token", "content": final_answer}
-    yield {"type": "agent_done", "answer": final_answer}
+    yield {"type": "agent_token", "content": answer}
+    yield {"type": "agent_done", "answer": answer}

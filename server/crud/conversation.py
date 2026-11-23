@@ -20,7 +20,7 @@ from models.conversation import Conversation
 from services.agent.agent import run_agent
 
 
-MAX_CONTEXT_MESSAGES = 6
+MAX_CONTEXT_MESSAGES = 2
 
 
 async def title_exists(
