@@ -70,3 +70,42 @@ export interface ConversationTitleRequest {
 //   message: ConversationWebSocketMessage | string;
 // }
 
+// ==========================================
+// CONVERSATION MESSAGE STREAM (SSE) TYPES
+// ==========================================
+
+export interface AgentStatusEvent {
+  type: "agent_status";
+  status: "thinking" | "executing_tool" | "generating_answer";
+  tool?: string;
+}
+
+export interface AgentTokenEvent {
+  type: "agent_token";
+  content: string;
+}
+
+export interface AgentMessageSavedEvent {
+  type: "agent_message_saved";
+  message: MessageResponse;
+}
+
+export interface AgentErrorEvent {
+  type: "error";
+  message: string;
+}
+
+export type ConversationSSEEvent =
+  | AgentStatusEvent
+  | AgentTokenEvent
+  | AgentMessageSavedEvent
+  | AgentErrorEvent;
+
+export interface SendMessageStreamCallbacks {
+  onStatus?: (event: AgentStatusEvent) => void;
+  onToken?: (content: string) => void;
+  onMessageSaved?: (message: MessageResponse) => void;
+  onError?: (event: AgentErrorEvent) => void;
+  onDone?: () => void;
+}
+

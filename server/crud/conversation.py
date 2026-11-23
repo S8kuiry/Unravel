@@ -5,8 +5,7 @@ from fastapi import  HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from models.conversation import Conversation,Message
-from sqlalchemy import select, func
-from sqlalchemy import delete, or_, select
+from sqlalchemy import delete, select,Integer, func
 import asyncio
 import json
 import logging
@@ -285,15 +284,15 @@ async def _stream_agent_sse(
 
             yield _format_sse_event(event)
 
-        if final_answer is None:
+        if not isinstance(final_answer, str) or not final_answer.strip():
             raise RuntimeError(
-                "Agent finished without providing a final answer"
+                "Agent finished without a non-empty final answer"
             )
 
         agent_message = await create_message(
             db=db,
             conversation=conversation,
-            content=final_answer,
+            content=final_answer.strip(),
             role="agent",
         )
         completed = True

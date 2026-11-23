@@ -26,7 +26,14 @@ export interface ChatMessage {
 interface MessageListProps {
     messages: ChatMessage[];
     isSending: boolean;
+    streamStatus: "thinking" | "executing_tool" | "generating_answer" | null;
 }
+
+const statusLabels: Record<string, string> = {
+    thinking: "Thinking",
+    executing_tool: "Searching repository…",
+    generating_answer: "Writing answer…",
+};
 
 // ==========================================
 // COMPONENT
@@ -35,6 +42,7 @@ interface MessageListProps {
 export default function MessageList({
     messages,
     isSending,
+    streamStatus,
 }: MessageListProps) {
 
     const bottomRef = useRef<HTMLDivElement>(null);
@@ -158,7 +166,7 @@ export default function MessageList({
                                                     <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-[#F5A524] [animation-delay:150ms]" />
                                                     <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-[#F5A524] [animation-delay:300ms]" />
                                                 </span>
-                                                {isUser ? "Sending..." : "Thinking..."}
+                                                {isUser ? "Sending..." : streamStatus ? statusLabels[streamStatus] : "Thinking..."}
                                             </div>
                                         ) : (
                                             isUser ? (
@@ -192,14 +200,6 @@ export default function MessageList({
                             </div>
                         );
                     })}
-
-                    {/* Sending Indicator */}
-                    {isSending && (
-                        <div className="flex w-fit items-center gap-2 rounded-full border border-white/[0.07] bg-[#1D1915]/60 px-3 py-1.5 text-[10px] text-[#938A7F] backdrop-blur-xl">
-                            <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-[#F5A524]" />
-                            Processing your message...
-                        </div>
-                    )}
 
                     <div ref={bottomRef} />
 

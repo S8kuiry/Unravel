@@ -8,6 +8,9 @@ import {
   MessageCreateRequest,
   MessageResponse,
   ConversationTitleRequest,
+  AgentStatusEvent,
+  AgentErrorEvent,
+  SendMessageStreamCallbacks,
 } from "@/types/conversation";
 
 const API_BASE_URL =
@@ -144,24 +147,30 @@ export async function renameConversation(
 }
 
 // ==========================================
-// SEND MESSAGE
+// SEND MESSAGE (SSE STREAM)
 // ==========================================
 
 /**
- * Send a message in a conversation and receive the agent response.
- * Backend: POST /conversations/{conversation_id}/messages
+ * Send a message in a conversation and stream the agent response via SSE.
+ * Backend: POST /conversations/{conversation_id}/messages  (text/event-stream)
+ *
+ * Backend SSE events are dispatched through callbacks so the UI can render
+ * progress and streamed tokens as they arrive. Resolves with the saved agent
+ * message once the stream finishes, or null if the stream ended without one.
  */
 export async function sendConversationMessage(
   token: string,
   conversation_id: string,
-  data: MessageCreateRequest
-): Promise<MessageResponse> {
+  data: MessageCreateRequest,
+  callbacks: SendMessageStreamCallbacks = {}
+): Promise<MessageResponse | null> {
   const res = await fetch(
     `${API_BASE_URL}/conversations/${encodeURIComponent(conversation_id)}/messages`,
     {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
+        Accept: "text/event-stream",
         Authorization: `Bearer ${token}`,
       },
       body: JSON.stringify(data),
@@ -169,10 +178,83 @@ export async function sendConversationMessage(
   );
 
   if (!res.ok) {
-    await handleApiError(res, "Failed to send conversation message.");
+    const errorData = await res.json().catch(() => ({}));
+    throw new Error(errorData.detail || "Failed to send conversation message.");
   }
 
-  return res.json();
+  if (!res.body) {
+    throw new Error("Streaming is not supported by this response.");
+  }
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let finalMessage: MessageResponse | null = null;
+
+  try {
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+
+      // SSE events are separated by a blank line.
+      const events = buffer.split(/\r?\n\r?\n/);
+
+      // Keep the last incomplete event for the next chunk.
+      buffer = events.pop() ?? "";
+
+      for (const event of events) {
+        if (!event.trim() || event.startsWith(":")) continue;
+
+        const lines = event.split(/\r?\n/);
+        let eventData = "";
+
+        for (const line of lines) {
+          if (line.startsWith("data:")) {
+            eventData += line.slice(5).trim();
+          }
+        }
+
+        if (!eventData) continue;
+
+        try {
+          const parsed = JSON.parse(eventData);
+
+          switch (parsed.type) {
+            case "agent_status":
+              callbacks.onStatus?.(parsed as AgentStatusEvent);
+              break;
+
+            case "agent_token":
+              callbacks.onToken?.(parsed.content);
+              break;
+
+            case "agent_message_saved":
+              finalMessage = parsed.message as MessageResponse;
+              callbacks.onMessageSaved?.(finalMessage);
+              break;
+
+            case "error":
+              callbacks.onError?.({
+                type: "error",
+                message: parsed.message,
+              } as AgentErrorEvent);
+              break;
+
+            default:
+              break;
+          }
+        } catch {
+          console.error("Failed to parse SSE event:", event);
+        }
+      }
+    }
+  } finally {
+    callbacks.onDone?.();
+  }
+
+  return finalMessage;
 }
 
 // ==========================================

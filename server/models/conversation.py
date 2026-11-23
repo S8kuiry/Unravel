@@ -9,6 +9,7 @@ from sqlalchemy import (
     Index,
     String,
     Text,
+    Integer
 )
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import relationship

@@ -95,7 +95,7 @@ class GroqProvider:
             **kwargs,
         }
 
-        if tools:
+        if tools is not None:
             request_args["tools"] = tools
             request_args["tool_choice"] = tool_choice or "auto"
 

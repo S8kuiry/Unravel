@@ -25,7 +25,6 @@ import {
 } from "@/api/conversation";
 
 import type {
-    MessageResponse,
     ConversationDetailResponse,
     ConversationListResponse
 } from "@/types/conversation";
@@ -76,6 +75,9 @@ export default function ChatView({
 
     const [isSending, setIsSending] = useState(false);
     const [localMessages, setLocalMessages] = useState<ChatMessage[]>([]);
+    const [streamStatus, setStreamStatus] = useState<
+      "thinking" | "executing_tool" | "generating_answer" | null
+    >(null);
 
     // ======================================
     // FETCH CONVERSATION MESSAGES
@@ -214,23 +216,73 @@ export default function ChatView({
             // 2. Switch conversation AFTER the cache is filled
             if (activeId !== conversationId) onConversationCreated(activeId);
 
-            // 3. Get the reply
-
-            const response = await sendConversationMessage(token, activeId, {
-                content, branch, role: "user", 
-            });
-
-            // 4. Replace the pending agent message in place
-            queryClient.setQueryData<ConversationDetailResponse>(key, (old) => ({
-                ...old!,
-                messages: old!.messages.map((m) =>
-                    m.id === tempAgentId
-                        ? { ...response, status: "completed" }
-                        : m.id === tempUserId
-                            ? { ...m, status: "completed" }
-                            : m
-                ),
-            }));
+            // 3. Stream the reply via SSE (backend returns text/event-stream)
+            await sendConversationMessage(
+                token,
+                activeId,
+                { content, branch, role: "user" },
+                {
+                    onStatus: (event) => {
+                        setStreamStatus(event.status);
+                    },
+                    onToken: (chunk) => {
+                        queryClient.setQueryData<ConversationDetailResponse>(
+                            key,
+                            (old) => ({
+                                ...old!,
+                                messages: old!.messages.map((m) =>
+                                    m.id === tempAgentId
+                                        ? {
+                                              ...m,
+                                              content: m.content + chunk,
+                                              status: "pending",
+                                          }
+                                        : m
+                                ),
+                            })
+                        );
+                    },
+                    onMessageSaved: (saved) => {
+                        queryClient.setQueryData<ConversationDetailResponse>(
+                            key,
+                            (old) => ({
+                                ...old!,
+                                messages: old!.messages.map((m) =>
+                                    m.id === tempAgentId
+                                        ? { ...saved, status: "completed" }
+                                        : m.id === tempUserId
+                                            ? { ...m, status: "completed" }
+                                            : m
+                                ),
+                            })
+                        );
+                        setStreamStatus(null);
+                    },
+                    onError: (event) => {
+                        queryClient.setQueryData<ConversationDetailResponse>(
+                            ["conversation", activeId],
+                            (old) =>
+                                old && {
+                                    ...old,
+                                    messages: old.messages
+                                        .filter((m) => m.id !== tempAgentId)
+                                        .map((m) =>
+                                            m.id === tempUserId
+                                                ? { ...m, status: "error" }
+                                                : m
+                                        ),
+                                }
+                        );
+                        setStreamStatus(null);
+                        toast.error(
+                            event.message || "Failed to generate response."
+                        );
+                    },
+                    onDone: () => {
+                        setStreamStatus(null);
+                    },
+                }
+            );
 
             void queryClient.invalidateQueries({ queryKey: ["conversations", repoId] });
         } catch (error) {
@@ -324,10 +376,13 @@ export default function ChatView({
 
                 ) : (
 
+                    <>
                     <MessageList
                         messages={messages}
                         isSending={isSending}
+                        streamStatus={streamStatus}
                     />
+                    </>
 
                 )}
 
