@@ -1,37 +1,43 @@
-from uuid import UUID
-
-from fastapi import APIRouter, Depends, HTTPException, Query
-from models.github import Repository
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, delete as sql_delete , or_
-from db.database import get_db
-from security.auth import get_current_uid
+import asyncio
+import json
 import logging
-from models.conversation import (
-    ConversationCreateRequest,
-    ConversationResponse,
-    ConversationListResponse,
-    ConversationDetailResponse,
-    ConversationRenameRequest,
-    ConversationTitleRequest,
-    MessageCreateRequest,
-    MessageResponse,Message
-)
+from uuid import UUID
+from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import StreamingResponse
+from sqlalchemy import delete, or_, select
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from crud.conversation import (
     create_conversation,
-    get_repository_conversations,
+    create_message,
+    delete_conversation,
     get_conversation_by_id,
+    get_repository_conversations,
     make_unique_title,
     rename_conversation,
-    delete_conversation,
-    create_message,
 )
-from services.agent.agent import run_agent
+from db.database import get_db
+from models.conversation import (
+    ConversationCreateRequest,
+    ConversationDetailResponse,
+    ConversationListResponse,
+    ConversationRenameRequest,
+    ConversationResponse,
+    ConversationTitleRequest,
+    MessageCreateRequest,
+)
+from models.github import Repository
+from security.auth import get_current_uid
 from services.agent.groq_client import generate_title
+from crud.conversation import (
+    _get_owned_conversation,
+    _stream_agent_sse,
+    _build_recent_context
+)
+
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/conversations", tags=["conversations"])
 
-MAX_CONTEXT_MESSAGES = 6
 
 # create conversation
 @router.post("/", response_model=ConversationResponse)
@@ -171,61 +177,23 @@ async def update_conversation_title(
     )
 
 
-# send message 
-@router.post(
-    "/{conversation_id}/messages",
-    response_model=MessageResponse,
-)
+
+@router.post("/{conversation_id}/messages")
 async def send_user_message(
     conversation_id: UUID,
     request: MessageCreateRequest,
     uid: str = Depends(get_current_uid),
     db: AsyncSession = Depends(get_db),
 ):
-    # 1. Get conversation
-    conversation = await get_conversation_by_id(
+    conversation = await _get_owned_conversation(
+        db=db,
+        conversation_id=conversation_id,
+        uid=uid,
+    )
+    context = await _build_recent_context(
         db=db,
         conversation_id=conversation_id,
     )
-
-    if conversation is None:
-        raise HTTPException(404, "Conversation not found")
-
-    # 2. Verify conversation ownership
-    statement = select(Repository).where(
-        Repository.id == conversation.repo_id,
-        Repository.user_uid == uid,
-    )
-
-    result = await db.execute(statement)
-
-    if result.scalar_one_or_none() is None:
-        raise HTTPException(404, "Conversation not found")
-
-    # 3. Fetch previous conversation messages
-    statement = (
-        select(Message)
-        .where(Message.conversation_id == conversation_id)
-        .order_by(
-            Message.created_at.desc(),
-            Message.id.desc(),
-        )
-        .limit(MAX_CONTEXT_MESSAGES)
-    )
-
-    result = await db.execute(statement)
-    previous_messages = list(reversed(result.scalars().all()))
-
-    context = [
-        {
-            "role": "user" if msg.role == "user" else "assistant",
-            "content": msg.content,
-        }
-        for msg in previous_messages
-        if msg.role in ("user", "agent") and msg.content
-    ]
-
-    # 4. Save current user message
     user_message = await create_message(
         db=db,
         conversation=conversation,
@@ -233,53 +201,20 @@ async def send_user_message(
         role="user",
     )
 
-    user_message_id = user_message.id
-
-    try:
-        # 5. Generate agent response
-        answer = await run_agent(
-            message=request.content,
-            db=db,
-            repo_id=conversation.repo_id,
-            branch=request.branch,
-            context=context,
-        )
-
-        # 6. Save agent response
-        agent_message = await create_message(
+    return StreamingResponse(
+        _stream_agent_sse(
             db=db,
             conversation=conversation,
-            content=answer,
-            role="agent",
-        )
-
-        return agent_message
-
-    except Exception as e:
-        # 7. Roll back any failed database transaction
-        await db.rollback()
-
-        # 8. Delete ONLY this request's user message
-        await db.execute(
-            sql_delete(Message).where(
-                Message.id == user_message_id,
-                Message.conversation_id == conversation_id,
-            )
-        )
-
-        await db.commit()
-
-        logger.exception(
-            "Failed to process message %s",
-            user_message_id,
-        )
-
-        raise HTTPException(
-            status_code=502,
-            detail="Failed to generate response. Your message was not saved.",
-        ) from e
-
-    
+            request=request,
+            context=context,
+            user_message_id=user_message.id,
+        ),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 # generate an AI title from the first user message
 @router.post("/{conversation_id}/title", response_model=ConversationResponse)
@@ -366,4 +301,3 @@ async def remove_conversation(
     )
 
     return {"detail": "Conversation deleted successfully"}
-

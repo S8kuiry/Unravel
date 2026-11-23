@@ -89,6 +89,10 @@ async def run_agent(
 
     # 3. No tool requested: the streamed answer is complete.
     if not tool_calls:
+        yield {
+            "type": "agent_done",
+            "answer": assistant_content,
+        }
         return
 
     # 4. Reconstruct the complete assistant tool-call message.
@@ -160,13 +164,22 @@ async def run_agent(
         "status": "generating_answer",
     }
 
+    final_answer = ""
+
     async for chunk in llm.generate_stream(
         messages=messages,
         tools=None,
     ):
 
         if chunk["type"] == "content":
+            final_answer += chunk["content"]
+
             yield {
                 "type": "agent_token",
                 "content": chunk["content"],
             }
+
+    yield {
+        "type": "agent_done",
+        "answer": final_answer,
+    }

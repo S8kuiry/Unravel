@@ -8,7 +8,7 @@ from groq import AsyncGroq
 from dotenv import load_dotenv
 
 from services.llm.config import LLMConfig
-from server.prompts.agent_prompts import TITLE_SYSTEM_PROMPT,AGENT_SYSTEM_PROMPT
+from prompts.agent_prompts import TITLE_SYSTEM_PROMPT,AGENT_SYSTEM_PROMPT
 
 load_dotenv()
 
