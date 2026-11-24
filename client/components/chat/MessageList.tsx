@@ -1,12 +1,14 @@
 
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
     Bot,
     User,
     Sparkles,
     AlertCircle,
+    Copy,
+    Check,
 } from "lucide-react";
 import MarkdownRenderer from "./MarkdownRenderer";
 
@@ -46,6 +48,18 @@ export default function MessageList({
 }: MessageListProps) {
 
     const bottomRef = useRef<HTMLDivElement>(null);
+    const [copiedId, setCopiedId] = useState<string | null>(null);
+
+    const handleCopy = async (id: string, text: string) => {
+        if (!text) return;
+        try {
+            await navigator.clipboard.writeText(text);
+            setCopiedId(id);
+            setTimeout(() => setCopiedId((prev) => (prev === id ? null : prev)), 2000);
+        } catch {
+            /* clipboard write failed */
+        }
+    };
 
     // --------------------------------------
     // Auto Scroll
@@ -185,16 +199,40 @@ export default function MessageList({
                                         )}
                                     </div>
 
-                                    {/* Timestamp */}
-                                    <p className="mt-2 text-right text-[9px] text-[#756D63]">
-                                        {isUser && isError && (
-                                            <span className="mr-2 text-red-400">Failed</span>
-                                        )}
-                                        {new Date(message.created_at).toLocaleTimeString(undefined, {
-                                            hour: "2-digit",
-                                            minute: "2-digit",
-                                        })}
-                                    </p>
+                                    {/* Footer: Copy action & Timestamp */}
+                                    <div className="mt-2 flex items-center justify-between gap-3 text-[9px] text-[#756D63]">
+                                        <div>
+                                            {message.content && !isPending && (
+                                                <button
+                                                    type="button"
+                                                    onClick={() => handleCopy(message.id, message.content)}
+                                                    className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[#8E8477] transition-colors hover:bg-white/[0.06] hover:text-[#E8E2D9]"
+                                                    title="Copy entire message"
+                                                >
+                                                    {copiedId === message.id ? (
+                                                        <>
+                                                            <Check size={11} className="text-[#F5A524]" />
+                                                            <span className="text-[#F5A524]">Copied</span>
+                                                        </>
+                                                    ) : (
+                                                        <>
+                                                            <Copy size={11} />
+                                                            <span>Copy</span>
+                                                        </>
+                                                    )}
+                                                </button>
+                                            )}
+                                        </div>
+                                        <div className="text-right">
+                                            {isUser && isError && (
+                                                <span className="mr-2 text-red-400">Failed</span>
+                                            )}
+                                            {new Date(message.created_at).toLocaleTimeString(undefined, {
+                                                hour: "2-digit",
+                                                minute: "2-digit",
+                                            })}
+                                        </div>
+                                    </div>
 
                                 </div>
                             </div>
