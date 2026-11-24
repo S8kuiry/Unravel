@@ -1,26 +1,23 @@
-
-from uuid import UUID
-from datetime import datetime, timezone
-from fastapi import  HTTPException
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
-from models.conversation import Conversation,Message
-from sqlalchemy import delete, select,Integer, func
 import asyncio
 import json
 import logging
-from models.conversation import (
 
+from datetime import datetime, timezone
+from uuid import UUID
+
+from fastapi import HTTPException
+from sqlalchemy import delete, func, select
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
+
+from models.conversation import (
+    Conversation,
     Message,
     MessageCreateRequest,
 )
-logger = logging.getLogger(__name__)
 from models.github import Repository
-from models.conversation import Conversation
+
 from services.agent.agent import run_agent
-
-
-MAX_CONTEXT_MESSAGES = 2
 
 
 async def title_exists(
@@ -213,28 +210,6 @@ async def _get_owned_conversation(
     return conversation
 
 
-async def _build_recent_context(
-    db: AsyncSession,
-    conversation_id: UUID,
-    limit: int = MAX_CONTEXT_MESSAGES,
-) -> list[dict[str, str]]:
-    statement = (
-        select(Message)
-        .where(Message.conversation_id == conversation_id)
-        .order_by(Message.created_at.desc(), Message.id.desc())
-        .limit(limit)
-    )
-    result = await db.execute(statement)
-    previous_messages = list(reversed(result.scalars().all()))
-
-    return [
-        {
-            "role": "user" if msg.role == "user" else "assistant",
-            "content": msg.content,
-        }
-        for msg in previous_messages
-        if msg.role in ("user", "agent") and msg.content
-    ]
 
 
 async def _rollback_and_delete_message(
@@ -259,11 +234,11 @@ async def _rollback_and_delete_message(
         )
 
 
+
 async def _stream_agent_sse(
     db: AsyncSession,
     conversation: Conversation,
     request: MessageCreateRequest,
-    context: list[dict[str, str]],
     user_message_id: UUID,
 ):
     completed = False
@@ -276,7 +251,8 @@ async def _stream_agent_sse(
             db=db,
             repo_id=conversation.repo_id,
             branch=request.branch,
-            context=context,
+            conversation_id=conversation.id,
+            user_message_id=user_message_id,
         ):
             if event.get("type") == "agent_done":
                 final_answer = event.get("answer")
@@ -295,6 +271,7 @@ async def _stream_agent_sse(
             content=final_answer.strip(),
             role="agent",
         )
+
         completed = True
 
         yield _format_sse_event({
@@ -316,15 +293,15 @@ async def _stream_agent_sse(
             "Failed to process message %s",
             user_message_id,
         )
+
         if not completed:
             await _rollback_and_delete_message(
                 db=db,
                 conversation_id=conversation.id,
                 message_id=user_message_id,
             )
+
         yield _format_sse_event({
             "type": "error",
             "message": "Failed to generate response.",
         })
-
-

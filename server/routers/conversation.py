@@ -32,7 +32,7 @@ from services.agent.groq_client import generate_title
 from crud.conversation import (
     _get_owned_conversation,
     _stream_agent_sse,
-    _build_recent_context
+    
 )
 
 logger = logging.getLogger(__name__)
@@ -190,10 +190,7 @@ async def send_user_message(
         conversation_id=conversation_id,
         uid=uid,
     )
-    context = await _build_recent_context(
-        db=db,
-        conversation_id=conversation_id,
-    )
+
     user_message = await create_message(
         db=db,
         conversation=conversation,
@@ -206,7 +203,6 @@ async def send_user_message(
             db=db,
             conversation=conversation,
             request=request,
-            context=context,
             user_message_id=user_message.id,
         ),
         media_type="text/event-stream",
@@ -215,6 +211,7 @@ async def send_user_message(
             "X-Accel-Buffering": "no",
         },
     )
+
 
 # generate an AI title from the first user message
 @router.post("/{conversation_id}/title", response_model=ConversationResponse)

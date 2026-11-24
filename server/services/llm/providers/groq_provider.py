@@ -88,7 +88,7 @@ class GroqProvider:
             ]
 
         request_args = {
-            "model": model or self.title_model,
+            "model": model or self.chat_model,
             "messages": messages,
             "temperature": 0.2,
             "max_tokens": 4096,

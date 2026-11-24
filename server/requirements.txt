@@ -25,3 +25,4 @@ inngest>=0.4.0
 # --- AI & LLM SDK ---
 google-genai>=0.1.0
 groq>=0.4.0
+tiktoken>=0.7.0

@@ -8,6 +8,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from services.llm.gateway import LLMGateway
 from tools.definitions import AVAILABLE_TOOLS
 from tools.repository_tools import search_repository
+from services.context.builder import ContextBuilder
+from services.context.config import ContextConfig
+from services.context.token_counter import TokenCounter
+from services.context.summarizer import ConversationSummarizer
 
 llm = LLMGateway()
 MAX_TOOL_ITERATIONS = 3
@@ -19,21 +23,28 @@ def _is_tool_choice_none_error(exc: GroqAPIError) -> bool:
 
 
 async def _force_direct_answer(messages: list[dict]) -> str:
-    """Ask the model to answer directly from existing context without calling tools."""
+    """Ask the model to answer directly without calling tools."""
+
     nudge_messages = [
         *messages,
         {
-            "role": "user",
+            "role": "system",
             "content": (
-                "Do not call any tools. Answer directly now using only the "
-                "information and context already available."
+                "Do not call any tools. Answer directly using only "
+                "the information and context already available."
             ),
         },
     ]
+
     text = ""
-    async for chunk in llm.generate_stream(messages=nudge_messages, tools=None):
+
+    async for chunk in llm.generate_stream(
+        messages=nudge_messages,
+        tools=None,
+    ):
         if chunk["type"] == "content":
             text += chunk["content"]
+
     return text.strip()
 
 
@@ -98,49 +109,111 @@ async def run_agent(
     db: AsyncSession,
     repo_id: UUID,
     branch: str,
-    context: list | None = None,
+    conversation_id: UUID,
+    user_message_id: UUID,
 ) -> AsyncGenerator[dict, None]:
-    messages = [
-        {"role": m["role"], "content": m["content"]}
-        for m in (context or [])
-        if m.get("role") in ("user", "assistant") and m.get("content")
-    ]
-    messages.append({"role": "user", "content": message})
+
+    # Initialize context services.
+    context_config = ContextConfig.from_env()
+
+    token_counter = TokenCounter(
+        chars_per_token=context_config.chars_per_token,
+        message_overhead=context_config.message_overhead,
+    )
+
+    summarizer = ConversationSummarizer(
+        llm_gateway=llm,
+        config=context_config,
+    )
+
+    context_builder = ContextBuilder(
+        token_counter=token_counter,
+        summarizer=summarizer,
+        config=context_config,
+    )
 
     tools = AVAILABLE_TOOLS or None
     answer = ""
 
     yield {"type": "agent_status", "status": "thinking"}
 
+    # Load conversation history and build the initial context.
+    context_result = await context_builder.build_initial_context(
+        db=db,
+        conversation_id=conversation_id,
+        current_message_id=user_message_id,
+        current_message=message,
+        tools=tools,
+    )
+
+    messages = context_result.messages
+
     for _ in range(MAX_TOOL_ITERATIONS):
+
+        # Recheck context before every LLM request.
+        context_result = await context_builder.fit_context(
+            messages=messages,
+            tools=tools,
+        )
+
+        messages = context_result.messages
+
         text, tool_calls = await _collect_turn(messages, tools)
+
         if not tool_calls:
             answer = text.strip()
             break
 
-        messages.append({"role": "assistant", "content": None, "tool_calls": tool_calls})
+        messages.append({
+            "role": "assistant",
+            "content": None,
+            "tool_calls": tool_calls,
+        })
+
         for call in tool_calls:
             name = call["function"]["name"]
-            yield {"type": "agent_status", "status": "executing_tool", "tool": name}
-            output = await _call_tool(name, call["function"]["arguments"], db, repo_id, branch)
+
+            yield {
+                "type": "agent_status",
+                "status": "executing_tool",
+                "tool": name,
+            }
+
+            output = await _call_tool(
+                name,
+                call["function"]["arguments"],
+                db,
+                repo_id,
+                branch,
+            )
+
             messages.append({
                 "role": "tool",
                 "tool_call_id": call["id"],
                 "name": name,
                 "content": output,
             })
-        yield {"type": "agent_status", "status": "generating_answer"}
+
+        yield {
+            "type": "agent_status",
+            "status": "generating_answer",
+        }
 
     if not answer:
-        try:
-            answer = await _force_direct_answer(messages)
-        except GroqAPIError as exc:
-            if not _is_tool_choice_none_error(exc):
-                raise
-            answer = ""
+        # Fit context again before the direct-answer request.
+        context_result = await context_builder.fit_context(
+            messages=messages,
+            tools=None,
+        )
+
+        messages = context_result.messages
+
+        answer = await _force_direct_answer(messages)
 
     if not answer:
-        raise RuntimeError("Agent completed without a non-empty answer")
+        raise RuntimeError(
+            "Agent completed without a non-empty answer"
+        )
 
     yield {"type": "agent_token", "content": answer}
     yield {"type": "agent_done", "answer": answer}
