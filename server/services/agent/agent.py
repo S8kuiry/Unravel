@@ -22,13 +22,13 @@ def _is_tool_choice_none_error(exc: GroqAPIError) -> bool:
     return "tool choice is none" in combined
 
 
-async def _force_direct_answer(messages: list[dict]) -> str:
+async def _force_direct_answer(messages: list[dict], max_tokens: int = 4096) -> str:
     """Ask the model to answer directly without calling tools."""
 
     nudge_messages = [
         *messages,
         {
-            "role": "system",
+            "role": "user",
             "content": (
                 "Do not call any tools. Answer directly using only "
                 "the information and context already available."
@@ -37,13 +37,33 @@ async def _force_direct_answer(messages: list[dict]) -> str:
     ]
 
     text = ""
-
-    async for chunk in llm.generate_stream(
-        messages=nudge_messages,
-        tools=None,
-    ):
-        if chunk["type"] == "content":
-            text += chunk["content"]
+    try:
+        async for chunk in llm.generate_stream(
+            messages=nudge_messages,
+            tools=None,
+            max_tokens=max_tokens,
+        ):
+            if chunk["type"] == "content":
+                text += chunk["content"]
+    except GroqAPIError as exc:
+        if not _is_tool_choice_none_error(exc):
+            raise
+        # If tool/tool_call messages are confusing the model, retry with plain text turns only.
+        plain_messages = [
+            m for m in messages
+            if m.get("role") in ("user", "assistant") and m.get("content")
+        ]
+        plain_messages.append({
+            "role": "user",
+            "content": "Answer directly in plain text only using what you already know.",
+        })
+        async for chunk in llm.generate_stream(
+            messages=plain_messages,
+            tools=None,
+            max_tokens=max_tokens,
+        ):
+            if chunk["type"] == "content":
+                text += chunk["content"]
 
     return text.strip()
 
@@ -52,11 +72,12 @@ async def _collect_turn(
     messages: list[dict],
     tools: list | None,
     *,
+    max_tokens: int = 4096,
     _retried: bool = False,
 ) -> tuple[str, list[dict]]:
     text = ""
     calls: dict[int, dict] = {}
-    kwargs: dict = {"messages": messages}
+    kwargs: dict = {"messages": messages, "max_tokens": max_tokens}
     if tools:
         kwargs["tools"] = tools
         kwargs["tool_choice"] = "auto"
@@ -158,7 +179,9 @@ async def run_agent(
 
         messages = context_result.messages
 
-        text, tool_calls = await _collect_turn(messages, tools)
+        text, tool_calls = await _collect_turn(
+            messages, tools, max_tokens=context_config.output_reserve
+        )
 
         if not tool_calls:
             answer = text.strip()
@@ -208,7 +231,7 @@ async def run_agent(
 
         messages = context_result.messages
 
-        answer = await _force_direct_answer(messages)
+        answer = await _force_direct_answer(messages, max_tokens=context_config.output_reserve)
 
     if not answer:
         raise RuntimeError(

@@ -7,6 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from models.conversation import Conversation, Message
+from prompts.agent_prompts import AGENT_SYSTEM_PROMPT
 from services.context.config import ContextConfig
 from services.context.token_counter import TokenCounter
 from services.context.summarizer import ConversationSummarizer
@@ -158,18 +159,27 @@ class ContextBuilder:
         history = list(result.scalars().all())
 
         # Update the saved summary when necessary.
-        await self._update_summary(
-            db=db,
+        summary_result = await self._update_summary(
             conversation=conversation,
             history=history,
         )
+        if summary_result is not None:
+            new_summary, summary_end = summary_result
+            conversation.summary = new_summary
+            conversation.summary_message_count = summary_end
+            await db.commit()
 
         # Only messages not already covered by the summary
         # need to be included as original conversation history.
         summarized_count = conversation.summary_message_count or 0
         recent_history = history[summarized_count:]
 
-        messages = []
+        messages = [
+            {
+                "role": "system",
+                "content": AGENT_SYSTEM_PROMPT,
+            },
+        ]
 
         if conversation.summary:
             messages.append({
@@ -201,10 +211,9 @@ class ContextBuilder:
 
     async def _update_summary(
         self,
-        db: AsyncSession,
         conversation: Conversation,
         history: list[Message],
-    ) -> None:
+    ) -> tuple[str, int] | None:
 
         summarized_count = conversation.summary_message_count or 0
         recent_limit = self.config.recent_limit
@@ -213,7 +222,7 @@ class ContextBuilder:
         summary_end = max(0, len(history) - recent_limit)
 
         if summary_end <= summarized_count:
-            return
+            return None
 
         unsummarized = history[summarized_count:]
 
@@ -232,7 +241,7 @@ class ContextBuilder:
         )
 
         if current_token_count <= self.config.summarize_threshold:
-            return
+            return None
 
         messages_to_summarize = history[
             summarized_count:summary_end
@@ -248,7 +257,7 @@ class ContextBuilder:
         ]
 
         if not summary_input:
-            return
+            return None
 
         try:
             new_summary = await self.summarizer.summarize(
@@ -257,12 +266,7 @@ class ContextBuilder:
             )
 
             if not new_summary:
-                return
-
-            conversation.summary = new_summary
-            conversation.summary_message_count = summary_end
-
-            await db.commit()
+                return None
 
             logger.info(
                 "Updated summary for conversation %s. "
@@ -271,12 +275,14 @@ class ContextBuilder:
                 summary_end,
             )
 
+            return new_summary, summary_end
+
         except Exception:
-            await db.rollback()
             logger.exception(
                 "Failed to summarize conversation %s",
                 conversation.id,
             )
+            return None
 
     async def fit_context(
         self,
@@ -366,11 +372,17 @@ class ContextBuilder:
 
             total_tokens = count_tokens()
 
-        # Never silently send an oversized request.
+        # Last resort: keep only the system prompt and latest user message.
+        # This always fits within the budget.
         if total_tokens > available_tokens:
-            raise ValueError(
-                "Context exceeds the available token budget."
-            )
+            system_msgs = [
+                m for m in messages if m.get("role") == "system"
+            ]
+            user_msgs = [
+                m for m in messages if m.get("role") == "user"
+            ]
+            messages = system_msgs + user_msgs[-1:]
+            total_tokens = count_tokens()
 
         return ContextResult(
             messages=messages,

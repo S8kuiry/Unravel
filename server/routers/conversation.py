@@ -1,5 +1,4 @@
-import asyncio
-import json
+
 import logging
 from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -28,7 +27,7 @@ from models.conversation import (
 )
 from models.github import Repository
 from security.auth import get_current_uid
-from services.agent.groq_client import generate_title
+from services.llm.gateway import LLMGateway
 from crud.conversation import (
     _get_owned_conversation,
     _stream_agent_sse,
@@ -36,6 +35,7 @@ from crud.conversation import (
 )
 
 logger = logging.getLogger(__name__)
+llm_gateway = LLMGateway()
 router = APIRouter(prefix="/conversations", tags=["conversations"])
 
 
@@ -246,7 +246,7 @@ async def generate_conversation_title(
     if current and not normalized.startswith(current):
         return conversation
 
-    new_title = await generate_title(request.content)
+    new_title = await llm_gateway.generate_title(request.content)
 
     if not new_title:
         return conversation  # keep the fallback title

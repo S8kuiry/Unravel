@@ -602,7 +602,23 @@ async def get_repository_file_contents(
 
             return {"path": path, "content": content}
 
-        return await asyncio.gather(*(fetch_single_file(p) for p in paths))
+        results = await asyncio.gather(*(fetch_single_file(p) for p in paths))
+
+        indexing_result = await enqueue_fetched_files_for_indexing(
+            db=db,
+            repo_id=db_repo.id,
+            branch=branch,
+        )
+        await db.commit()
+
+        print(f"Indexing queue (lazy fetch): {indexing_result}")
+        if indexing_result.get("created", 0) > 0:
+            await send_indexing_event(
+                repo_id=db_repo.id,
+                branch=branch,
+            )
+
+        return results
 
 
 async def hydrate_repository(
@@ -628,10 +644,6 @@ async def hydrate_repository(
     if not db_repo:
         raise ValueError("Repository not found in database")
     repo_id = db_repo.id
-
-    sync = await db.get(RepoSyncState, (repo_id, branch))
-    if not sync or not sync.tarball_ok:
-        return {"status": "skipped", "stored": 0, "missing": None}
 
     file_rows = await db.execute(
         select(RepoFile.path, RepoFile.sha).where(

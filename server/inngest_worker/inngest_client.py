@@ -9,10 +9,11 @@ from dotenv import load_dotenv
 # `.env` load below does not override, so it only fills in what is still unset.
 # `server/` directory (one level up from this file), where .env / .env.local live.
 _root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-load_dotenv(dotenv_path=os.path.join(_root, ".env.local"), override=True)
+# load_dotenv(dotenv_path=os.path.join(_root, ".env.local"), override=True)
 load_dotenv(dotenv_path=os.path.join(_root, ".env"))
 
-is_dev = os.getenv("INNGEST_DEV", "").lower() in ("1", "true", "yes")
+_inngest_dev = os.getenv("INNGEST_DEV", "").strip().lower()
+is_dev = _inngest_dev not in ("", "0", "false", "no")
 
 # In development (Inngest Dev Server) never feed production keys to the client.
 # The SDK falls back to its own dev-server event key when no event key is set and

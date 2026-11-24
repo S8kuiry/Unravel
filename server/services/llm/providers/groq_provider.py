@@ -91,7 +91,7 @@ class GroqProvider:
             "model": model or self.chat_model,
             "messages": messages,
             "temperature": 0.2,
-            "max_tokens": 4096,
+            "max_tokens": kwargs.pop("max_tokens", 4096),
             **kwargs,
         }
 
@@ -131,7 +131,7 @@ class GroqProvider:
             "model": model or self.chat_model,
             "messages": messages,
             "temperature": 0.2,
-            "max_tokens": 4096,
+            "max_tokens": kwargs.pop("max_tokens", 4096),
             **kwargs,
             "stream": True,
         }
